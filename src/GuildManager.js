@@ -122,8 +122,15 @@ class GuildManager {
 
       if (state.currentChannelId) {
         const curr = guild.channels.cache.get(state.currentChannelId);
-        if (!curr || (curr.members && Array.from(curr.members.values()).filter(m => m.id !== this.client.user.id).length === 0)) {
-          this.leaveVoiceChannel(guild.id, 'periodic-empty');
+        const isEmpty = !curr || (curr.members && Array.from(curr.members.values()).filter(m => m.id !== this.client.user.id).length === 0);
+        if (isEmpty) {
+          state.emptyCheckCount = (state.emptyCheckCount || 0) + 1;
+          if (state.emptyCheckCount >= 3) {
+            state.emptyCheckCount = 0;
+            this.leaveVoiceChannel(guild.id, 'periodic-empty');
+          }
+        } else {
+          state.emptyCheckCount = 0;
         }
       }
 
