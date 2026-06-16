@@ -332,6 +332,25 @@ class GuildManager {
       return userClips[userId] || [];
   }
 
+  _looksLikeTrigger(ctx) {
+    // Exact and common spelling variants
+    const nameVariants = [
+      'balthazar', 'balthasar', 'baltazar', 'balthezar', 'balthaser',
+      'bal thazar', 'bal tha zar', 'bal ta zar',
+      // Whisper phonetic breakdowns seen in transcripts
+      'about the czar', 'about tzar', 'about the tzar', 'about azar',
+      'abouts are', 'alphas are', 'alpha czar', 'alpha tzar',
+      'south is our', 'balth',
+    ];
+    const hasName = nameVariants.some(v => ctx.includes(v));
+    // "clip" must appear somewhere in the joined context
+    const hasClip = /\bclip\b/.test(ctx);
+    // czar/tzar alone near clip is strong enough (Whisper almost always renders the zar sound this way)
+    const hasCzarWithClip = /\b(czar|tzar|azar)\b/.test(ctx) && hasClip;
+
+    return (hasName && hasClip) || hasCzarWithClip;
+  }
+
   shouldTriggerClipFromContext(guildId, userId) {
     const state = this.getGuildState(guildId);
     const now = Date.now();
@@ -345,8 +364,7 @@ class GuildManager {
 
     if (!ctx) return false;
 
-    const canonical = 'balthazar clip that';
-    if (ctx.includes(canonical)) {
+    if (this._looksLikeTrigger(ctx)) {
       state.lastClipTriggerByUser.set(userId, now);
       state.transcriptHistoryByUser.set(userId, []);
       return true;
