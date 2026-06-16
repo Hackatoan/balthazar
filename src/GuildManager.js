@@ -345,7 +345,7 @@ class GuildManager {
 
     if (!ctx) return false;
 
-    const canonical = 'terry clip that';
+    const canonical = 'balthazar clip that';
     if (ctx.includes(canonical)) {
       state.lastClipTriggerByUser.set(userId, now);
       state.transcriptHistoryByUser.set(userId, []);
