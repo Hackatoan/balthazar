@@ -1,6 +1,6 @@
 [![Buy Me A Coffee](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://buymeacoffee.com/hackatoa)
 
-# TerryVis
+# Balthazar
 
 A Discord voice bot that streams audio to a web UI, transcribes speech using `faster-whisper`, and creates 30-second clips on command or voice trigger.
 
@@ -30,8 +30,8 @@ A Discord voice bot that streams audio to a web UI, transcribes speech using `fa
 ## Setup with Docker
 
 ```bash
-git clone https://github.com/Hackatoan/terryvis.git
-cd terryvis
+git clone https://github.com/Hackatoan/balthazar.git
+cd balthazar
 cp .env.example .env   # fill in DISCORD_TOKEN at minimum
 docker compose up --build
 ```
