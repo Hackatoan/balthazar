@@ -113,7 +113,7 @@ class AsrClient {
             chunk16k = normalizeToTargetRms(chunk16k, 0.1, 6.0);
             const audioBuffer = Buffer.from(chunk16k.buffer);
             const userName = st.name;
-            const triggerGrammar = '["terry clip that"]'; // For Vosk
+            const triggerGrammar = '["balthazar clip that"]'; // For Vosk
 
             st.transcribeQueue = st.transcribeQueue.then(() =>
               axios.post(ASR_URL, audioBuffer, {
