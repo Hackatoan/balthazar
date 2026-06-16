@@ -340,7 +340,7 @@ class GuildManager {
       // Whisper phonetic breakdowns seen in transcripts
       'about the czar', 'about tzar', 'about the tzar', 'about azar',
       'abouts are', 'alphas are', 'alpha czar', 'alpha tzar',
-      'south is our', 'balth',
+      'south is our', 'balth', 'bal',
     ];
     const hasName = nameVariants.some(v => ctx.includes(v));
     // "clip" must appear somewhere in the joined context
