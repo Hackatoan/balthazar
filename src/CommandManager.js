@@ -36,7 +36,7 @@ class CommandManager {
           '- -clipbots: Server owner only, toggle including bot audio in clips (default OFF)',
           '',
           '**Voice Triggers**',
-          '- "Terry clip that"'
+          '- "Balthazar clip that"'
         ].join('\n');
         try { await message.reply(helpText); } catch (_) {}
         return;
