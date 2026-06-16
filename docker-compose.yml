@@ -1,41 +1,34 @@
-version: "3.9"
-
 services:
   asr:
-    build:
-      context: .
-      dockerfile: Dockerfile.whisper
+    image: ghcr.io/hackatoan/balthazar-asr:latest
+    container_name: balthazar-asr
+    restart: unless-stopped
     environment:
-      # Run the ASR service in Vosk mode by default for speed
-      - ASR_ENGINE=${ASR_ENGINE:-faster-whisper}
-      - WHISPER_MODEL=${WHISPER_MODEL:-base.en}
+      - ASR_ENGINE=faster-whisper
+      - WHISPER_MODEL=base.en
     ports:
       - "5005:5005"
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
 
   bot:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/hackatoan/balthazar:latest
+    container_name: balthazar-bot
+    restart: unless-stopped
     depends_on:
       - asr
-    environment:
-      # Secrets / runtime values are picked up from the environment or the .env file.
-      - DISCORD_TOKEN=${DISCORD_TOKEN}
-      - CLIPS_CHANNEL_ID=${CLIPS_CHANNEL_ID}
-      - PORT=${PORT:-3000}
-      # ASR configuration: choose 'vosk' (default)
-      - ASR_ENGINE=${ASR_ENGINE:-faster-whisper}
-      # When using Vosk, point to the model directory available in the container
-      - WHISPER_MODEL=${WHISPER_MODEL:-base.en}
-      # URL to the ASR server (internal docker service name 'asr')
-      - ASR_URL=${ASR_URL:-http://asr:5005}
-      # Backwards-compatible name used in some configs
-      - WHISPER_URL=${WHISPER_URL:-http://asr:5005}
-      # Optional: public base URL where the web UI is reachable (used for clip links)
-      - CLIPS_BASE_URL=${CLIPS_BASE_URL:-http://localhost:3000}
+    env_file: .env
     ports:
-      - "${PORT:-3000}:${PORT:-3000}"
-    # Mount clips folder for persistence if desired
+      - "3020:3000"
     volumes:
-      - ./public/clips:/app/public/clips
-      - ./data:/app/data
+      - /opt/terryvis/clips:/app/public/clips
+      - balthazar-data:/app/data
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+volumes:
+  balthazar-data:
+
+networks:
+  default:
+    name: balthazar_default
