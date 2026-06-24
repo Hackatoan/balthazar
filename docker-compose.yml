@@ -1,22 +1,8 @@
 services:
-  asr:
-    image: ghcr.io/hackatoan/balthazar-asr:latest
-    container_name: balthazar-asr
-    restart: unless-stopped
-    environment:
-      - ASR_ENGINE=faster-whisper
-      - WHISPER_MODEL=base.en
-    ports:
-      - "5005:5005"
-    labels:
-      - "com.centurylinklabs.watchtower.enable=true"
-
   bot:
     image: ghcr.io/hackatoan/balthazar:latest
     container_name: balthazar-bot
     restart: unless-stopped
-    depends_on:
-      - asr
     env_file: .env
     ports:
       - "3020:3000"

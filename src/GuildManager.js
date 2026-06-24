@@ -4,7 +4,6 @@ const prism = require('prism-media');
 const fs = require('fs');
 const path = require('path');
 const wav = require('wav');
-const AsrClient = require('./AsrClient');
 
 const CLIP_SECONDS = 30;
 const CLIP_SAMPLE_RATE = 48000;
@@ -56,8 +55,6 @@ class GuildManager {
     this.client = client;
     this.webUI = webUI;
     this.guilds = new Map();
-    this.asrClient = new AsrClient(this.webUI, this);
-
     // Legacy support logic that still relies on file-level state
     this.userJoinTimestamps = {};
   }
@@ -229,7 +226,21 @@ class GuildManager {
 
     const receiver = state.currentConnection.receiver;
     receiver.speaking.on('start', (userId) => {
-      this.asrClient.handleAudioStream(guildId, userId, receiver);
+      const state = this.getGuildState(guildId);
+      if (state.activeStreams && state.activeStreams.has(userId)) return;
+      const userObj = this.client.users.cache.get(userId);
+      if (userObj && userObj.bot) return;
+      const decoder = new prism.opus.Decoder({ rate: 48000, channels: 2, frameSize: 960 });
+      const stream = receiver.subscribe(userId, { end: { behavior: EndBehaviorType.AfterSilence, duration: 500 } });
+      if (state.activeStreams) state.activeStreams.set(userId, true);
+      stream.pipe(decoder);
+      decoder.on('data', chunk => {
+        const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        const pcm = new Int16Array(buf.buffer, buf.byteOffset, buf.length / 2);
+        this.writeToUserRing(guildId, userId, pcm);
+      });
+      decoder.on('end', () => { if (state.activeStreams) state.activeStreams.delete(userId); });
+      decoder.on('error', () => { if (state.activeStreams) state.activeStreams.delete(userId); });
     });
   }
 
