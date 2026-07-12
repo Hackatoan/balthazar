@@ -39,3 +39,11 @@ jobs:
           file: Dockerfile.whisper
           push: true
           tags: ghcr.io/hackatoan/balthazar-asr:latest
+
+      - name: Build and push piper
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile.piper
+          push: true
+          tags: ghcr.io/hackatoan/balthazar-piper:latest
