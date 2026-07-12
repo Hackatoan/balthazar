@@ -37,16 +37,38 @@ async function registerTalkCommand(guild) {
   catch (e) { console.warn(`[slash] register failed for ${guild.id}: ${e?.message || e}`); }
 }
 
+function refreshGuildPanel(guildId) {
+  const st = guildManager.getGuildState(guildId);
+  if (!st || !st.currentChannelId) return;
+  const guild = client.guilds.cache.get(guildId);
+  const ch = guild && guild.channels.cache.get(st.currentChannelId);
+  if (ch) webUI.updateWebMembers(ch, guildId);
+}
+
 webUI.onSetClipChannel = (payload, socket) => {
   if (payload.guildId && payload.channelId !== undefined) {
     guildManager.setConfig(payload.guildId, 'clipChannelId', payload.channelId || null);
     console.log(`[web] clip channel for ${payload.guildId} set to ${payload.channelId}`);
-    // broadcast update
-    const g = guildManager.guilds.get(payload.guildId);
-    if (g && g.channel) {
-      webUI.updateWebMembers(g.channel, payload.guildId);
-    }
+    refreshGuildPanel(payload.guildId);
   }
+};
+
+webUI.onClipRequest = (payload) => {
+  if (!payload || !payload.guildId) return;
+  guildManager.handleVoiceClipCommand(payload.guildId, 'Web Panel', null, payload.title || '', null, null);
+  console.log(`[web] clip requested for ${payload.guildId}`);
+};
+
+webUI.onAssignClip = (payload) => {
+  if (!payload || !payload.userId || !payload.url) return;
+  guildManager.addUserClip(payload.userId, payload.title || '', payload.url, payload.guildId || null);
+  console.log(`[web] clip assigned to ${payload.userId}`);
+};
+
+webUI.onRemoveClip = (payload) => {
+  if (!payload || !payload.userId || !payload.url) return;
+  guildManager.removeUserClip(payload.userId, payload.url, payload.guildId || null);
+  console.log(`[web] clip removed from ${payload.userId}`);
 };
 
 webUI.onPlayUpload = (payload, socket) => {

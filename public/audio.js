@@ -175,7 +175,8 @@ document.addEventListener('click', async (e) => {
     const g = guildContainers[guildId];
     if(!g) return;
     const targetUser = g.playMode === 'all' ? null : g.playMode;
-    socket.emit('assign_clip_to_user', { url, title, userId: targetUser });
+    if (!targetUser) { showToast('Select a user first'); return; }
+    socket.emit('assign_clip_to_user', { url, title, userId: targetUser, guildId });
     showToast('Assigned to user');
     return;
   }
@@ -187,7 +188,8 @@ document.addEventListener('click', async (e) => {
     const g = guildContainers[guildId];
     if(!g) return;
     const targetUser = g.playMode === 'all' ? null : g.playMode;
-    socket.emit('remove_user_clip', { url, userId: targetUser });
+    if (!targetUser) { showToast('Select a user first'); return; }
+    socket.emit('remove_user_clip', { url, userId: targetUser, guildId });
     showToast('Removed from user');
     return;
   }
