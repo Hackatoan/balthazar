@@ -265,6 +265,10 @@ class GuildManager {
         const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
         const pcm = new Int16Array(buf.buffer, buf.byteOffset, buf.length / 2);
         this.writeToUserRing(guildId, userId, pcm);
+        // Live web-panel monitor: stream decoded audio only while a browser is watching.
+        if (this.webUI && this.webUI.hasClients && this.webUI.hasClients()) {
+          this.webUI.emitToAll('audio', { userId, data: buf.toString('base64') });
+        }
         if (utter && utter.len < 48000 * 2 * 20) { // cap ~20s of 48k stereo
           utter.chunks.push(pcm.slice()); // copy: decoder buffer is reused
           utter.len += pcm.length;
@@ -383,6 +387,13 @@ class GuildManager {
   addUserClip(userId, title, url, guildId) {
       if (!userClips[userId]) userClips[userId] = [];
       userClips[userId].push({ url, timestamp: Date.now(), title: title || '' });
+      saveUserClips();
+      this.webUI.emitToAll('user_clips_updated', { guildId, userId, clips: userClips[userId] });
+  }
+
+  removeUserClip(userId, url, guildId) {
+      if (!userClips[userId]) return;
+      userClips[userId] = userClips[userId].filter(e => e.url !== url);
       saveUserClips();
       this.webUI.emitToAll('user_clips_updated', { guildId, userId, clips: userClips[userId] });
   }

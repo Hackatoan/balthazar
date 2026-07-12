@@ -37,7 +37,24 @@ class WebUI {
           this.onPlayUpload(payload, socket);
         }
       });
+
+      socket.on('clip_request', (payload) => {
+        if (this.onClipRequest) this.onClipRequest(payload, socket);
+      });
+
+      socket.on('assign_clip_to_user', (payload) => {
+        if (this.onAssignClip) this.onAssignClip(payload, socket);
+      });
+
+      socket.on('remove_user_clip', (payload) => {
+        if (this.onRemoveClip) this.onRemoveClip(payload, socket);
+      });
     });
+  }
+
+  // True when at least one browser is connected (used to gate live-audio streaming).
+  hasClients() {
+    try { return this.io.engine.clientsCount > 0; } catch (_) { return false; }
   }
 
   start() {
