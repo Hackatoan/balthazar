@@ -55,6 +55,7 @@ class GuildManager {
     this.client = client;
     this.webUI = webUI;
     this.guilds = new Map();
+    this.talkManager = null; // set by index.js after construction
     // Legacy support logic that still relies on file-level state
     this.userJoinTimestamps = {};
   }
@@ -94,10 +95,24 @@ class GuildManager {
         activeStreams: new Map(),
         transcriptContextByUser: new Map(),
         lastClipTriggerByUser: new Map(),
-        transcriptHistoryByUser: new Map()
+        transcriptHistoryByUser: new Map(),
+        // /talk conversational mode
+        talkActive: false,
+        botSpeaking: false,
+        utterBuf: new Map() // userId -> { chunks: number[], len: number, name: string }
       });
     }
     return this.guilds.get(guildId);
+  }
+
+  setBotSpeaking(guildId, on) {
+    this.getGuildState(guildId).botSpeaking = !!on;
+  }
+
+  stopSpeaking(guildId) {
+    const state = this.getGuildState(guildId);
+    state.botSpeaking = false;
+    try { if (state.currentPlayer) state.currentPlayer.stop(true); } catch (_) {}
   }
 
   checkEligibleChannels() {
@@ -227,19 +242,45 @@ class GuildManager {
     const receiver = state.currentConnection.receiver;
     receiver.speaking.on('start', (userId) => {
       const state = this.getGuildState(guildId);
-      if (state.activeStreams && state.activeStreams.has(userId)) return;
       const userObj = this.client.users.cache.get(userId);
       if (userObj && userObj.bot) return;
+
+      // Barge-in: if Balthazar is talking and a human starts, yield the floor.
+      if (state.talkActive && state.botSpeaking && this.talkManager) {
+        this.talkManager.bargeIn(guildId);
+      }
+
+      if (state.activeStreams && state.activeStreams.has(userId)) return;
       const decoder = new prism.opus.Decoder({ rate: 48000, channels: 2, frameSize: 960 });
       const stream = receiver.subscribe(userId, { end: { behavior: EndBehaviorType.AfterSilence, duration: 500 } });
       if (state.activeStreams) state.activeStreams.set(userId, true);
+
+      // While /talk is active, buffer this utterance for speech-to-text.
+      let utter = state.talkActive
+        ? { chunks: [], len: 0, name: userObj ? userObj.username : userId }
+        : null;
+
       stream.pipe(decoder);
       decoder.on('data', chunk => {
         const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
         const pcm = new Int16Array(buf.buffer, buf.byteOffset, buf.length / 2);
         this.writeToUserRing(guildId, userId, pcm);
+        if (utter && utter.len < 48000 * 2 * 20) { // cap ~20s of 48k stereo
+          utter.chunks.push(pcm.slice()); // copy: decoder buffer is reused
+          utter.len += pcm.length;
+        }
       });
-      decoder.on('end', () => { if (state.activeStreams) state.activeStreams.delete(userId); });
+      decoder.on('end', () => {
+        if (state.activeStreams) state.activeStreams.delete(userId);
+        if (utter && utter.len > 0 && state.talkActive && this.talkManager) {
+          const merged = new Int16Array(utter.len);
+          let off = 0;
+          for (const c of utter.chunks) { merged.set(c, off); off += c.length; }
+          utter.chunks = null;
+          this.talkManager.onUtterance(guildId, userId, utter.name, merged);
+        }
+        utter = null;
+      });
       decoder.on('error', () => { if (state.activeStreams) state.activeStreams.delete(userId); });
     });
   }

@@ -9,6 +9,30 @@ services:
     volumes:
       - /opt/terryvis/clips:/app/public/clips
       - balthazar-data:/app/data
+    depends_on:
+      - asr
+      - piper
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  asr:
+    image: ghcr.io/hackatoan/balthazar-asr:latest
+    container_name: balthazar-asr
+    restart: unless-stopped
+    environment:
+      - WHISPER_MODEL=base.en
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  piper:
+    image: ghcr.io/hackatoan/balthazar-piper:latest
+    container_name: balthazar-piper
+    restart: unless-stopped
+    environment:
+      - PIPER_MODEL=/models/en_US-kristin-medium.onnx
+    volumes:
+      # Piper voice models live with the Home Assistant voice stack (read-only).
+      - /opt/homelab/homeassistant/piper-data:/models:ro
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 

@@ -3,10 +3,11 @@ require("@snazzah/davey");
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
-const { Client, GatewayIntentBits } = require('discord.js');
+const { Client, GatewayIntentBits, SlashCommandBuilder, MessageFlags } = require('discord.js');
 const WebUI = require('./WebUI');
 const GuildManager = require('./GuildManager');
 const CommandManager = require('./CommandManager');
+const TalkManager = require('./TalkManager');
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN || '';
 
@@ -23,6 +24,18 @@ const webUI = new WebUI();
 const guildManager = new GuildManager(client, webUI);
 webUI.guildManager = guildManager;
 const commandManager = new CommandManager(client, guildManager, webUI);
+const talkManager = new TalkManager(guildManager, webUI);
+guildManager.talkManager = talkManager;
+
+const talkCommand = new SlashCommandBuilder()
+  .setName('talk')
+  .setDescription('Toggle Balthazar conversational voice mode on/off')
+  .toJSON();
+
+async function registerTalkCommand(guild) {
+  try { await guild.commands.set([talkCommand]); }
+  catch (e) { console.warn(`[slash] register failed for ${guild.id}: ${e?.message || e}`); }
+}
 
 webUI.onSetClipChannel = (payload, socket) => {
   if (payload.guildId && payload.channelId !== undefined) {
@@ -68,8 +81,17 @@ webUI.onPlayUpload = (payload, socket) => {
   }
 };
 
-client.on('ready', () => {
+client.on('ready', async () => {
   console.log(`[discord] Logged in as ${client.user.tag}`);
+  console.log(`[talk] mode ${talkManager.configured ? 'configured' : 'DISABLED (no GEMINI_API_KEY)'}`);
+  for (const guild of client.guilds.cache.values()) {
+    await registerTalkCommand(guild);
+  }
+  console.log(`[slash] /talk registered in ${client.guilds.cache.size} guild(s)`);
+});
+
+client.on('guildCreate', (guild) => {
+  registerTalkCommand(guild);
 });
 
 client.on('voiceStateUpdate', (oldState, newState) => {
@@ -78,6 +100,29 @@ client.on('voiceStateUpdate', (oldState, newState) => {
 
 client.on('messageCreate', async (message) => {
   commandManager.handleMessage(message);
+});
+
+client.on('interactionCreate', async (interaction) => {
+  try {
+    if (!interaction.isChatInputCommand() || interaction.commandName !== 'talk') return;
+    if (!interaction.guild) {
+      await interaction.reply({ content: 'Use this in a server.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (!talkManager.configured) {
+      await interaction.reply({ content: 'Talk mode is not configured (missing GEMINI_API_KEY).', flags: MessageFlags.Ephemeral });
+      return;
+    }
+    const guildId = interaction.guild.id;
+    const on = talkManager.setActive(guildId, !talkManager.isActive(guildId));
+    const inVc = !!guildManager.getGuildState(guildId).currentChannelId;
+    const note = on
+      ? (inVc ? 'I\'m listening — say my name and I\'ll chime in.' : 'On — I\'ll start once I\'m in a voice channel.')
+      : 'Conversation mode off.';
+    await interaction.reply({ content: `🎙️ Talk mode **${on ? 'ON' : 'OFF'}**. ${note}` });
+  } catch (e) {
+    console.warn('[slash] interaction error:', e?.message || e);
+  }
 });
 
 setInterval(() => {

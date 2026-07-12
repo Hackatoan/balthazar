@@ -35,6 +35,9 @@ class CommandManager {
           '- -listignorevc: List ignored voice channels',
           '- -clipbots: Server owner only, toggle including bot audio in clips (default OFF)',
           '',
+          '**Conversation**',
+          '- /talk: Toggle voice conversation mode. When on, say "Balthazar ..." in the call and he talks back.',
+          '',
           '**Voice Triggers**',
           '- "Balthazar clip that"'
         ].join('\n');

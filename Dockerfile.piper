@@ -1,0 +1,17 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# espeak-ng provides phonemization data used by piper
+RUN apt-get update && apt-get install -y --no-install-recommends espeak-ng \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir "piper-tts==1.2.0" flask
+
+COPY piper_server.py .
+
+# Voice .onnx (+ .json) are mounted at /models via docker-compose
+ENV PIPER_MODEL=/models/en_US-kristin-medium.onnx
+EXPOSE 5006
+
+CMD ["python", "piper_server.py"]
