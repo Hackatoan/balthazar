@@ -260,6 +260,13 @@ class GuildManager {
         ? { chunks: [], len: 0, name: userObj ? userObj.username : userId }
         : null;
 
+      // Guard: a receive-stream 'error' (e.g. a DAVE decrypt hiccup) must never crash the process.
+      stream.on('error', (err) => {
+        console.warn(`[voice][${guildId}] receive stream error for ${userId}: ${err?.message || err}`);
+        if (state.activeStreams) state.activeStreams.delete(userId);
+        try { decoder.destroy(); } catch (_) {}
+        utter = null;
+      });
       stream.pipe(decoder);
       decoder.on('data', chunk => {
         const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
