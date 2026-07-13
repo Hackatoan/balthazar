@@ -30,7 +30,8 @@ class GeminiClient {
         model: this.modelName,
         systemInstruction: this.persona,
         safetySettings: SAFETY,
-        generationConfig: { temperature: 0.9, maxOutputTokens: 160 },
+        // thinkingBudget 0 disables 2.5's "thinking" step — much lower latency for chat.
+        generationConfig: { temperature: 0.9, maxOutputTokens: 160, thinkingConfig: { thinkingBudget: 0 } },
       });
     }
   }
@@ -39,13 +40,22 @@ class GeminiClient {
    * history: array of { name, text, bot } (oldest-first), latest turn included last.
    * Returns a short spoken reply string, or '' if nothing usable.
    */
-  async reply(history) {
+  async reply(history, context) {
     if (!this.enabled) return '';
     const lines = (history || []).map((t) =>
       t.bot ? `Balthazar: ${t.text}` : `${t.name}: ${t.text}`
     );
+    let ctxLine = '';
+    if (context) {
+      const who = (context.participants || []).filter(Boolean).join(', ');
+      const parts = [];
+      if (context.channelName) parts.push(`the "${context.channelName}" voice channel`);
+      if (who) parts.push(`with: ${who}`);
+      if (parts.length) ctxLine = `You are in ${parts.join(' ')}.\n`;
+    }
     const prompt =
-      'Here is the recent voice chat:\n' +
+      ctxLine +
+      'Here is the recent voice chat (speech-to-text, may be imperfect):\n' +
       lines.join('\n') +
       '\n\nReply as Balthazar with one or two short spoken sentences.';
 
@@ -56,7 +66,12 @@ class GeminiClient {
       text = text.replace(/^\s*balthazar\s*:\s*/i, '').trim();
       return text;
     } catch (e) {
-      console.warn('[gemini] reply error:', e?.message || e);
+      const msg = e?.message || String(e);
+      if (/429|quota|rate/i.test(msg)) {
+        console.warn('[gemini] QUOTA/RATE LIMIT hit — no reply. Free tier is very limited; consider a billing-enabled key.');
+      } else {
+        console.warn('[gemini] reply error:', msg);
+      }
       return '';
     }
   }

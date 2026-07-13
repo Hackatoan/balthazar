@@ -71,7 +71,15 @@ def transcribe_worker():
         try:
             if whisper_model is not None:
                 # Transcribe using faster-whisper
-                segments, info = whisper_model.transcribe(tmp_name, beam_size=5, vad_filter=True)
+                # beam_size=1 is ~2-3x faster than 5 on CPU; initial_prompt biases the
+                # decoder toward the name "Balthazar" (otherwise heard as "Beth Azar" etc).
+                segments, info = whisper_model.transcribe(
+                    tmp_name,
+                    beam_size=1,
+                    vad_filter=True,
+                    condition_on_previous_text=False,
+                    initial_prompt="Conversation with Balthazar.",
+                )
                 text_out = " ".join([segment.text for segment in segments])
                 text = text_out.strip()
                 respond({"text": text}, 200)
