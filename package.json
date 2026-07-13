@@ -4,7 +4,7 @@
   },
   "dependencies": {
     "@discordjs/opus": "^0.10.0",
-    "@discordjs/voice": "^0.19.2",
+    "@discordjs/voice": "0.19.3-dev.1782477336-8ceabfc27",
     "@google/generative-ai": "^0.24.1",
     "@snazzah/davey": "^0.1.11",
     "axios": "^1.11.0",

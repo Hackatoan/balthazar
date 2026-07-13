@@ -141,21 +141,24 @@ class TalkManager {
     if (!this.isActive(guildId)) return;
 
     const text = await this._transcribe(pcm48kStereo);
-    if (!text) return;
+    if (!text) { console.log(`[talk] ${name}: <no transcript>`); return; }
+    console.log(`[talk] heard ${name}: "${text}"`);
 
     this._pushHistory(guildId, { name, text, bot: false });
     try {
       this.webUI?.emitToAll('transcript', { guildId, userId, username: name, text, timestamp: Date.now() });
     } catch (_) {}
 
-    if (!this._shouldRespond(guildId, text)) return;
+    if (!this._shouldRespond(guildId, text)) { console.log('[talk] not addressed, ignoring'); return; }
     if (!this.configured) return;
 
     const s = this._state(guildId);
     const myTurn = ++s.turn; // claim this turn; a newer utterance or barge-in supersedes
 
     const reply = await this.gemini.reply(s.history);
-    if (myTurn !== s.turn || !reply) return; // superseded while thinking
+    if (myTurn !== s.turn) { console.log('[talk] superseded, dropping reply'); return; }
+    if (!reply) { console.log('[talk] empty gemini reply'); return; }
+    console.log(`[talk] reply: "${reply}"`);
 
     this._pushHistory(guildId, { name: 'Balthazar', text: reply, bot: true });
     await this._speak(guildId, reply, myTurn);
@@ -173,6 +176,7 @@ class TalkManager {
 
     const cleanup = () => { try { fs.unlinkSync(file); } catch (_) {} };
 
+    console.log(`[talk] speaking (${wav.length} bytes) in ${guildId}`);
     this.guildManager.setBotSpeaking(guildId, true);
     this.guildManager.playFileFromDisk(
       guildId,
