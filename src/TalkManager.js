@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const axios = require('axios');
 const GeminiClient = require('./GeminiClient');
+const ClaudeClient = require('./ClaudeClient');
 
 const ASR_URL = process.env.ASR_URL || 'http://balthazar-asr:5005/transcribe';
 const PIPER_URL = process.env.PIPER_URL || 'http://balthazar-piper:5006/synthesize';
@@ -88,12 +89,15 @@ class TalkManager {
   constructor(guildManager, webUI) {
     this.guildManager = guildManager;
     this.webUI = webUI;
-    this.gemini = new GeminiClient();
+    // Prefer Claude (reuses the Claude Code OAuth token) when available; else Gemini.
+    const claude = new ClaudeClient();
+    this.brain = claude.enabled ? claude : new GeminiClient();
+    console.log(`[talk] brain: ${claude.enabled ? 'claude (' + claude.model + ')' : 'gemini'}`);
     this.states = new Map(); // guildId -> { history, turn, lastRespondedAt }
   }
 
   get configured() {
-    return this.gemini.enabled;
+    return this.brain.enabled;
   }
 
   _state(guildId) {
@@ -190,7 +194,7 @@ class TalkManager {
     const myTurn = ++s.turn; // claim this turn; a newer utterance or barge-in supersedes
 
     const context = this.guildManager.getCallContext(guildId);
-    const reply = await this.gemini.reply(s.history, context);
+    const reply = await this.brain.reply(s.history, context);
     if (myTurn !== s.turn) { console.log('[talk] superseded, dropping reply'); return; }
     if (!reply) { console.log('[talk] empty gemini reply'); return; }
     console.log(`[talk] reply: "${reply}"`);
