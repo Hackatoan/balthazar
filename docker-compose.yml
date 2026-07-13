@@ -20,7 +20,7 @@ services:
     container_name: balthazar-asr
     restart: unless-stopped
     environment:
-      - WHISPER_MODEL=base.en
+      - WHISPER_MODEL=small.en
     labels:
       - "com.centurylinklabs.watchtower.enable=true"
 

@@ -12,8 +12,42 @@ const FOLLOWUP_MS = Number(process.env.TALK_FOLLOWUP_MS || 25000);
 const HISTORY_MAX = Number(process.env.TALK_HISTORY || 12);
 const MIN_CHARS = Number(process.env.TALK_MIN_CHARS || 2);
 
-// Balthazar hears his name; whisper often mangles it, so accept close variants.
-const NAME_RE = /\b(bal|balthazar|balthasar|balthzar|baltazar|balthizar)\b/i;
+// Balthazar hears his name; whisper mangles it badly (e.g. "Beth Azar",
+// "South Azar", "Balthasar"), so we match fuzzily by edit distance.
+const NAME = 'balthazar';
+const NAME_MAX_DIST = 3;
+
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  if (!m) return n;
+  if (!n) return m;
+  let prev = new Array(n + 1);
+  for (let j = 0; j <= n; j++) prev[j] = j;
+  for (let i = 1; i <= m; i++) {
+    const cur = [i];
+    for (let j = 1; j <= n; j++) {
+      const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+    }
+    prev = cur;
+  }
+  return prev[n];
+}
+
+// True if any 1-2 word span in the text is within edit distance of "balthazar".
+function mentionsName(text) {
+  const t = String(text).toLowerCase();
+  if (/\bbal\b|\bbalt/.test(t)) return true; // clear hits
+  const words = t.replace(/[^a-z\s]/g, ' ').split(/\s+/).filter(Boolean);
+  for (let i = 0; i < words.length; i++) {
+    for (let w = 1; w <= 2 && i + w <= words.length; w++) {
+      const chunk = words.slice(i, i + w).join('');
+      if (chunk.length < 5) continue;
+      if (levenshtein(chunk, NAME) <= NAME_MAX_DIST) return true;
+    }
+  }
+  return false;
+}
 
 // 48kHz stereo int16 -> 16kHz mono int16 (3:1 decimation with a light average).
 function downsampleTo16kMono(pcm48kStereo) {
@@ -101,7 +135,7 @@ class TalkManager {
   _shouldRespond(guildId, text) {
     if (!text || text.replace(/[^a-z0-9]/gi, '').length < MIN_CHARS) return false;
     if (ALWAYS_RESPOND) return true;
-    if (NAME_RE.test(text)) return true;
+    if (mentionsName(text)) return true;
     const s = this._state(guildId);
     if (Date.now() - s.lastRespondedAt < FOLLOWUP_MS) return true; // mid-conversation
     return false;
