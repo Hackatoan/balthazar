@@ -115,6 +115,20 @@ class GuildManager {
     try { if (state.currentPlayer) state.currentPlayer.stop(true); } catch (_) {}
   }
 
+  // Who/where Balthazar is talking to right now, for LLM context.
+  getCallContext(guildId) {
+    const state = this.getGuildState(guildId);
+    const guild = this.client.guilds.cache.get(guildId);
+    if (!guild || !state.currentChannelId) return null;
+    const ch = guild.channels.cache.get(state.currentChannelId);
+    if (!ch) return null;
+    const botId = this.client.user?.id;
+    const participants = Array.from(ch.members.values())
+      .filter((m) => m.id !== botId && !m.user.bot)
+      .map((m) => m.user.username);
+    return { channelName: ch.name, guildName: guild.name, participants };
+  }
+
   checkEligibleChannels() {
     this.client.guilds.cache.forEach(guild => {
       if (!this.userJoinTimestamps[guild.id]) this.userJoinTimestamps[guild.id] = {};
