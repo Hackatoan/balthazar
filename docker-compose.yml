@@ -29,7 +29,7 @@ services:
     container_name: balthazar-piper
     restart: unless-stopped
     environment:
-      - PIPER_MODEL=/models/en_US-kristin-medium.onnx
+      - PIPER_MODEL=/models/en_US-ryan-medium.onnx
     volumes:
       # Piper voice models live with the Home Assistant voice stack (read-only).
       - /opt/homelab/homeassistant/piper-data:/models:ro
