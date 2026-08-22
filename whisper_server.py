@@ -1,8 +1,8 @@
 import tempfile
 import os
 import threading
-import queue
 import time
+import concurrent.futures
 from flask import Flask, request, jsonify
 import numpy as np
 import soundfile as sf
@@ -30,7 +30,20 @@ except Exception as e:
 
 MAX_QUEUE_SIZE = 6
 JOB_TIMEOUT = 20
-transcribe_queue = queue.Queue()
+
+# Was a single dedicated worker thread pulling one job at a time off a queue —
+# in a group voice call, the 2nd/3rd person talking at once had to wait for the
+# 1st person's whisper inference to fully finish before their own even started.
+# Measured directly: 3 concurrent requests landed at 2.2s / 4.3s / 6.6s total —
+# almost pure serialization (each ~2.2s inference, stacked). ctranslate2 (the
+# backend faster-whisper uses) releases the GIL during the actual compute, so a
+# small thread pool gives real concurrency, not just interleaving. Kept modest
+# (2) since this is a 4-core host shared with 30+ other containers — going
+# wider would trade queue-wait for CPU thrash instead of fixing anything.
+MAX_WORKERS = 2
+executor = concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="asr-worker")
+_in_flight = 0
+_in_flight_lock = threading.Lock()
 
 # Initialize VAD
 vad = webrtcvad.Vad()
@@ -60,52 +73,43 @@ def contains_speech(audio_data, sample_rate=16000):
     # If at least 20% of frames contain speech, consider it valid speech
     return (speech_frames / len(frames)) > 0.2
 
-def transcribe_worker():
-    while True:
-        job = transcribe_queue.get()
-        if job is None:
-            break
+def process_job(tmp_name, enqueue_time):
+    dequeue_time = time.time()
+    queue_wait_ms = (dequeue_time - enqueue_time) * 1000
+    print(f"[ASR QUEUE] starting (waited {queue_wait_ms:.0f}ms for a worker)", flush=True)
 
-        req, arr, tmp_name, respond, enqueue_time = job
-        dequeue_time = time.time()
-        queue_wait_ms = (dequeue_time - enqueue_time) * 1000
-        print(f"[ASR QUEUE] dequeued (waited {queue_wait_ms:.0f}ms, {transcribe_queue.qsize()} still queued)", flush=True)
-
-        try:
-            if whisper_model is not None:
-                # Transcribe using faster-whisper
-                # beam_size=1 is ~2-3x faster than 5 on CPU; initial_prompt biases the
-                # decoder toward the name "Balthazar" (otherwise heard as "Beth Azar" etc).
-                infer_start = time.time()
-                segments, info = whisper_model.transcribe(
-                    tmp_name,
-                    beam_size=1,
-                    vad_filter=True,
-                    condition_on_previous_text=False,
-                    initial_prompt="Conversation with Balthazar.",
-                )
-                # segments is a generator — the actual inference work happens here,
-                # while it's being iterated, not on the .transcribe() call above.
-                text_out = " ".join([segment.text for segment in segments])
-                text = text_out.strip()
-                infer_ms = (time.time() - infer_start) * 1000
-                total_ms = (time.time() - enqueue_time) * 1000
-                print(f"[ASR TIMING] queue_wait={queue_wait_ms:.0f}ms infer={infer_ms:.0f}ms total={total_ms:.0f}ms", flush=True)
-                respond({"text": text}, 200)
-            else:
-                respond({"error": "faster-whisper model unavailable."}, 500)
-        except Exception as e:
-            respond({"error": str(e)}, 500)
-        finally:
-            if os.path.exists(tmp_name):
-                os.unlink(tmp_name)
-            transcribe_queue.task_done()
-
-worker_thread = threading.Thread(target=transcribe_worker, daemon=True)
-worker_thread.start()
+    try:
+        if whisper_model is not None:
+            # beam_size=1 is ~2-3x faster than 5 on CPU; initial_prompt biases the
+            # decoder toward the name "Balthazar" (otherwise heard as "Beth Azar" etc).
+            infer_start = time.time()
+            segments, info = whisper_model.transcribe(
+                tmp_name,
+                beam_size=1,
+                vad_filter=True,
+                condition_on_previous_text=False,
+                initial_prompt="Conversation with Balthazar.",
+            )
+            # segments is a generator — the actual inference work happens here,
+            # while it's being iterated, not on the .transcribe() call above.
+            text_out = " ".join([segment.text for segment in segments])
+            text = text_out.strip()
+            infer_ms = (time.time() - infer_start) * 1000
+            total_ms = (time.time() - enqueue_time) * 1000
+            print(f"[ASR TIMING] queue_wait={queue_wait_ms:.0f}ms infer={infer_ms:.0f}ms total={total_ms:.0f}ms", flush=True)
+            return {"text": text}, 200
+        else:
+            return {"error": "faster-whisper model unavailable."}, 500
+    except Exception as e:
+        return {"error": str(e)}, 500
+    finally:
+        if os.path.exists(tmp_name):
+            os.unlink(tmp_name)
 
 @app.route('/transcribe', methods=['POST'])
 def transcribe():
+    global _in_flight
+
     audio_bytes = request.data
     if not audio_bytes or len(audio_bytes) < 128:
         return jsonify({"error": "No or too little audio received"}), 400
@@ -121,38 +125,27 @@ def transcribe():
     if not contains_speech(arr):
         return jsonify({"error": "No speech detected by VAD"}), 204
 
-    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-        sf.write(tmp.name, arr, 16000, subtype='PCM_16')
+    with _in_flight_lock:
+        if _in_flight >= MAX_QUEUE_SIZE:
+            return jsonify({"error": "Dropped due to queue overflow"}), 429
+        _in_flight += 1
 
-        done = threading.Event()
-        response = {}
-        status = [200]
+    tmp_name = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            sf.write(tmp.name, arr, 16000, subtype='PCM_16')
+            tmp_name = tmp.name
 
-        def respond(data, code):
-            response['data'] = data
-            status[0] = code
-            done.set()
-
-        qsize = transcribe_queue.qsize()
-        if qsize >= MAX_QUEUE_SIZE:
-            try:
-                for _ in range(qsize - MAX_QUEUE_SIZE + 1):
-                    old_job = transcribe_queue.get_nowait()
-                    _, _, old_tmp_name, old_respond, _ = old_job
-                    if os.path.exists(old_tmp_name):
-                        os.unlink(old_tmp_name)
-                    old_respond({"error": "Dropped due to queue overflow"}, 429)
-                    transcribe_queue.task_done()
-            except Exception:
-                pass
-
-        transcribe_queue.put((request, arr, tmp.name, respond, time.time()))
-
-        if not done.wait(JOB_TIMEOUT + 5):
-            os.unlink(tmp.name)
+        future = executor.submit(process_job, tmp_name, time.time())
+        try:
+            data, code = future.result(timeout=JOB_TIMEOUT + 5)
+        except concurrent.futures.TimeoutError:
             return jsonify({"error": f"Server response timed out after {JOB_TIMEOUT+5}s"}), 504
 
-        return jsonify(response['data']), status[0]
+        return jsonify(data), code
+    finally:
+        with _in_flight_lock:
+            _in_flight -= 1
 
 @app.route('/', methods=['POST'])
 def root_post():
@@ -164,9 +157,13 @@ def root_get():
         "ok": True,
         "endpoint": "/transcribe",
         "engine": ASR_ENGINE,
-        "model": os.environ.get("WHISPER_MODEL", "base.en")
+        "model": os.environ.get("WHISPER_MODEL", "base.en"),
+        "max_workers": MAX_WORKERS,
     }
     return jsonify(info), 200
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5005)
+    # threaded=True is required here too — without it Flask's dev server only
+    # accepts one request at a time regardless of the worker pool above, which
+    # would silently defeat the whole point of parallelizing the ASR workers.
+    app.run(host='0.0.0.0', port=5005, threaded=True)
