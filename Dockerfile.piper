@@ -12,6 +12,7 @@ COPY piper_server.py .
 
 # Voice .onnx (+ .json) are mounted at /models via docker-compose
 ENV PIPER_MODEL=/models/en_US-kristin-medium.onnx
+ENV PYTHONUNBUFFERED=1
 EXPOSE 5006
 
 CMD ["python", "piper_server.py"]

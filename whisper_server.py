@@ -2,6 +2,7 @@ import tempfile
 import os
 import threading
 import queue
+import time
 from flask import Flask, request, jsonify
 import numpy as np
 import soundfile as sf
@@ -65,14 +66,17 @@ def transcribe_worker():
         if job is None:
             break
 
-        req, arr, tmp_name, respond = job
-        print(f"[ASR QUEUE] Processing job. Queue size: {transcribe_queue.qsize()}")
+        req, arr, tmp_name, respond, enqueue_time = job
+        dequeue_time = time.time()
+        queue_wait_ms = (dequeue_time - enqueue_time) * 1000
+        print(f"[ASR QUEUE] dequeued (waited {queue_wait_ms:.0f}ms, {transcribe_queue.qsize()} still queued)", flush=True)
 
         try:
             if whisper_model is not None:
                 # Transcribe using faster-whisper
                 # beam_size=1 is ~2-3x faster than 5 on CPU; initial_prompt biases the
                 # decoder toward the name "Balthazar" (otherwise heard as "Beth Azar" etc).
+                infer_start = time.time()
                 segments, info = whisper_model.transcribe(
                     tmp_name,
                     beam_size=1,
@@ -80,8 +84,13 @@ def transcribe_worker():
                     condition_on_previous_text=False,
                     initial_prompt="Conversation with Balthazar.",
                 )
+                # segments is a generator — the actual inference work happens here,
+                # while it's being iterated, not on the .transcribe() call above.
                 text_out = " ".join([segment.text for segment in segments])
                 text = text_out.strip()
+                infer_ms = (time.time() - infer_start) * 1000
+                total_ms = (time.time() - enqueue_time) * 1000
+                print(f"[ASR TIMING] queue_wait={queue_wait_ms:.0f}ms infer={infer_ms:.0f}ms total={total_ms:.0f}ms", flush=True)
                 respond({"text": text}, 200)
             else:
                 respond({"error": "faster-whisper model unavailable."}, 500)
@@ -129,7 +138,7 @@ def transcribe():
             try:
                 for _ in range(qsize - MAX_QUEUE_SIZE + 1):
                     old_job = transcribe_queue.get_nowait()
-                    _, _, old_tmp_name, old_respond = old_job
+                    _, _, old_tmp_name, old_respond, _ = old_job
                     if os.path.exists(old_tmp_name):
                         os.unlink(old_tmp_name)
                     old_respond({"error": "Dropped due to queue overflow"}, 429)
@@ -137,7 +146,7 @@ def transcribe():
             except Exception:
                 pass
 
-        transcribe_queue.put((request, arr, tmp.name, respond))
+        transcribe_queue.put((request, arr, tmp.name, respond, time.time()))
 
         if not done.wait(JOB_TIMEOUT + 5):
             os.unlink(tmp.name)

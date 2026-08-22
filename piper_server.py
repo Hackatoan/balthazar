@@ -1,5 +1,6 @@
 import io
 import os
+import time
 import wave
 
 from flask import Flask, request, jsonify, send_file
@@ -48,7 +49,9 @@ def synthesize():
         text = text[:1200]
 
     try:
+        t0 = time.time()
         buf = synth_wav_bytes(text)
+        print(f"[piper TIMING] synth={((time.time()-t0)*1000):.0f}ms len={len(text)}", flush=True)
     except Exception as e:  # noqa: BLE001
         return jsonify({"error": str(e)}), 500
 

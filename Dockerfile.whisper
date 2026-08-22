@@ -14,6 +14,9 @@ COPY whisper_server.py .
 
 # Optional model ENV var for faster-whisper (e.g. tiny.en, base.en, small.en)
 ENV WHISPER_MODEL=base.en
+# Without this, print() output can sit in a buffer and never reach `docker logs`
+# in real time — was masking the queue/timing diagnostics below entirely.
+ENV PYTHONUNBUFFERED=1
 EXPOSE 5005
 
 CMD ["python", "whisper_server.py"]
