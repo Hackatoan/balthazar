@@ -482,7 +482,15 @@ class GuildManager {
 
       state.currentPlayer.on(AudioPlayerStatus.Playing, started);
       state.currentPlayer.on(AudioPlayerStatus.Idle, ended);
-      state.currentPlayer.on('error', (err) => { onError && onError(err); });
+      // A fresh 'error' listener was added on every single call and never removed
+      // (Playing/Idle self-remove on fire, but most calls never error, so those
+      // never fire and pile up) — hit 11 accumulated listeners and Node's
+      // MaxListenersExceededWarning during one real session. Track and remove the
+      // specific previous handler instead of leaving it there forever; this does
+      // NOT touch the permanent logger registered once at connection setup.
+      if (state._playErrorHandler) { try { state.currentPlayer.off('error', state._playErrorHandler); } catch (_) {} }
+      state._playErrorHandler = (err) => { onError && onError(err); };
+      state.currentPlayer.on('error', state._playErrorHandler);
 
       state.currentPlayer.play(resource);
     } catch (e) {
@@ -516,7 +524,10 @@ class GuildManager {
 
       state.currentPlayer.on(AudioPlayerStatus.Playing, started);
       state.currentPlayer.on(AudioPlayerStatus.Idle, ended);
-      state.currentPlayer.on('error', (err) => { onError && onError(err); });
+      // See playFileFromDisk() above — same accumulating-listener fix.
+      if (state._playErrorHandler) { try { state.currentPlayer.off('error', state._playErrorHandler); } catch (_) {} }
+      state._playErrorHandler = (err) => { onError && onError(err); };
+      state.currentPlayer.on('error', state._playErrorHandler);
 
       state.currentPlayer.play(resource);
     } catch (e) {
