@@ -163,6 +163,8 @@ class TalkManager {
 
   async _synthesize(text) {
     try {
+      // Response body is raw 48kHz stereo s16le PCM (see piper_server.py) — relayed
+      // through as-is, no format handling needed here.
       const res = await axios.post(PIPER_URL, { text }, {
         responseType: 'arraybuffer',
         timeout: 20000,
@@ -204,20 +206,23 @@ class TalkManager {
   }
 
   async _speak(guildId, text, myTurn) {
-    const wav = await this._synthesize(text);
+    // Piper's /synthesize now returns raw 48kHz stereo s16le PCM directly (see
+    // piper_server.py) — already in the exact format StreamType.Raw needs, no
+    // container/header, no transcoding required on this end.
+    const pcm = await this._synthesize(text);
     const s = this._state(guildId);
-    if (!wav || myTurn !== s.turn) return; // barge-in happened while synthesizing
+    if (!pcm || myTurn !== s.turn) return; // barge-in happened while synthesizing
 
     const dir = path.join(os.tmpdir(), 'balthazar-tts');
     try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
-    const file = path.join(dir, `tts-${guildId}-${Date.now()}.wav`);
-    try { fs.writeFileSync(file, wav); } catch (e) { console.warn('[talk] write tts:', e?.message); return; }
+    const file = path.join(dir, `tts-${guildId}-${Date.now()}.pcm`);
+    try { fs.writeFileSync(file, pcm); } catch (e) { console.warn('[talk] write tts:', e?.message); return; }
 
     const cleanup = () => { try { fs.unlinkSync(file); } catch (_) {} };
 
-    console.log(`[talk] speaking (${wav.length} bytes) in ${guildId}`);
+    console.log(`[talk] speaking (${pcm.length} bytes) in ${guildId}`);
     this.guildManager.setBotSpeaking(guildId, true);
-    this.guildManager.playFileFromDisk(
+    this.guildManager.playRawPcmFromDisk(
       guildId,
       file,
       null,

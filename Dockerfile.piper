@@ -6,7 +6,7 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends espeak-ng \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir "piper-tts==1.2.0" flask
+RUN pip install --no-cache-dir "piper-tts==1.2.0" flask scipy
 
 COPY piper_server.py .
 

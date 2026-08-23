@@ -490,6 +490,40 @@ class GuildManager {
     }
   }
 
+  // For pre-resampled 48kHz stereo s16le PCM (i.e. Piper's /talk TTS output) only.
+  // createAudioResource() on a bare file path defaults to spawning an ffmpeg
+  // subprocess to transcode in real time as it plays — with zero CPU reservation
+  // on a host where ASR/Piper themselves routinely spike well over 100% CPU each,
+  // that subprocess is exactly what was glitching the bot's own voice mid-reply.
+  // StreamType.Raw skips ffmpeg entirely: @discordjs/opus encodes the (already
+  // final-format) PCM in-process, no subprocess, nothing to starve mid-stream.
+  async playRawPcmFromDisk(guildId, filePath, onStart, onEnd, onError) {
+    try {
+      const state = this.getGuildState(guildId);
+      if (!state.currentConnection) throw new Error('No voice connection');
+      await entersState(state.currentConnection, VoiceConnectionStatus.Ready, 10000);
+      if (!state.currentPlayer) {
+        state.currentPlayer = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
+        try { state.currentConnection.subscribe(state.currentPlayer); } catch (_) {}
+      }
+
+      const resource = createAudioResource(fs.createReadStream(filePath), { inputType: StreamType.Raw });
+
+      const started = () => { onStart && onStart(); try { state.currentPlayer.off(AudioPlayerStatus.Playing, started); } catch (_) {} };
+      const ended = () => { onEnd && onEnd(); try { state.currentPlayer.off(AudioPlayerStatus.Idle, ended); } catch (_) {} };
+      try { state.currentPlayer.removeAllListeners(AudioPlayerStatus.Playing); } catch (_) {}
+      try { state.currentPlayer.removeAllListeners(AudioPlayerStatus.Idle); } catch (_) {}
+
+      state.currentPlayer.on(AudioPlayerStatus.Playing, started);
+      state.currentPlayer.on(AudioPlayerStatus.Idle, ended);
+      state.currentPlayer.on('error', (err) => { onError && onError(err); });
+
+      state.currentPlayer.play(resource);
+    } catch (e) {
+      if (onError) onError(e);
+    }
+  }
+
   async handleVoiceClipCommand(guildId, requestedByName, requestedById, titleOptional, targetUserId, triggerChannelId) {
       try {
           const state = this.getGuildState(guildId);
