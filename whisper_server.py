@@ -16,18 +16,6 @@ except Exception:
 
 app = Flask(__name__)
 
-# Use faster-whisper instead of Vosk
-ASR_ENGINE = 'faster-whisper'
-try:
-    from faster_whisper import WhisperModel
-    MODEL_SIZE = os.environ.get("WHISPER_MODEL", "base.en")
-    # For CPU usage; change to 'cuda' and 'float16' if GPU is available
-    print(f"[ASR] Loading faster-whisper model: {MODEL_SIZE}")
-    whisper_model = WhisperModel(MODEL_SIZE, device="cpu", compute_type="int8")
-except Exception as e:
-    print('[ASR] faster-whisper initialization failed:', e)
-    whisper_model = None
-
 MAX_QUEUE_SIZE = 6
 JOB_TIMEOUT = 20
 
@@ -43,6 +31,29 @@ JOB_TIMEOUT = 20
 MAX_WORKERS = 2
 executor = concurrent.futures.ThreadPoolExecutor(max_workers=MAX_WORKERS, thread_name_prefix="asr-worker")
 _in_flight = 0
+
+# faster-whisper/ctranslate2 defaults cpu_threads to 0 (== auto, effectively
+# "use however many cores look available"), *per call*. That's fine for a
+# single serial worker, but with MAX_WORKERS>1 it means every concurrent call
+# independently grabs its own auto-sized batch of compute threads — measured
+# directly in production: a single whisper process pegged at 336% CPU on this
+# 4-core host once 2 requests ran at once. Pin it explicitly so
+# MAX_WORKERS * CPU_THREADS_PER_CALL == the host's real core count, instead of
+# oversubscribing every time concurrency actually kicks in.
+_HOST_CORES = os.cpu_count() or 4
+CPU_THREADS_PER_CALL = max(1, _HOST_CORES // MAX_WORKERS)
+
+# Use faster-whisper instead of Vosk
+ASR_ENGINE = 'faster-whisper'
+try:
+    from faster_whisper import WhisperModel
+    MODEL_SIZE = os.environ.get("WHISPER_MODEL", "base.en")
+    # For CPU usage; change to 'cuda' and 'float16' if GPU is available
+    print(f"[ASR] Loading faster-whisper model: {MODEL_SIZE} (cpu_threads={CPU_THREADS_PER_CALL}, workers={MAX_WORKERS}, host_cores={_HOST_CORES})")
+    whisper_model = WhisperModel(MODEL_SIZE, device="cpu", compute_type="int8", cpu_threads=CPU_THREADS_PER_CALL)
+except Exception as e:
+    print('[ASR] faster-whisper initialization failed:', e)
+    whisper_model = None
 _in_flight_lock = threading.Lock()
 
 # Initialize VAD
