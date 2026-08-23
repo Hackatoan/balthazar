@@ -1,7 +1,5 @@
 const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
 
-const SKIP_TOKEN = '<<SKIP>>';
-
 const DEFAULT_PERSONA = [
   'You are Balthazar, a Discord voice-chat companion hanging out in a live voice call.',
   'Your replies are SPOKEN ALOUD by a text-to-speech voice, so:',
@@ -9,14 +7,7 @@ const DEFAULT_PERSONA = [
   '- Sound natural and conversational, a little witty and dry, never robotic.',
   '- Spell things out for speech (say "twenty twenty six", not "2026").',
   '- You are hearing imperfect speech-to-text transcripts; if something is garbled, roll with it or ask a short clarifying question.',
-  'Do not narrate actions or describe yourself. Just say the reply.',
-  '',
-  'Not everything said nearby is directed at you. Before replying, look at the LAST line',
-  'of the transcript below (the newest thing said). Only actually reply if it is clearly',
-  'addressed to you — calls you by name, directly asks/tells you something, or is an',
-  'obvious continuation of a conversation you are already having with someone. If the',
-  'last line is people talking to each other, background noise that got transcribed as',
-  `words, or anything else not meant for you, respond with EXACTLY this and nothing else: ${SKIP_TOKEN}`,
+  'Do not narrate actions or describe yourself. Just say the reply.'
 ].join('\n');
 
 const SAFETY = [
@@ -73,10 +64,6 @@ class GeminiClient {
       let text = (result.response.text() || '').trim();
       // Strip any accidental "Balthazar:" prefix the model might add.
       text = text.replace(/^\s*balthazar\s*:\s*/i, '').trim();
-      if (text.toUpperCase().startsWith(SKIP_TOKEN)) {
-        console.log('[gemini] not addressed, skipping (model decided from context)');
-        return '';
-      }
       return text;
     } catch (e) {
       const msg = e?.message || String(e);
