@@ -21,6 +21,20 @@ const TOTAL_CLIP_SAMPLES = CLIP_SAMPLE_RATE * CLIP_CHANNELS * CLIP_SECONDS;
 // meaningfully hurting responsiveness for a genuine "ok stop, let me talk" case.
 const BARGE_IN_DEBOUNCE_MS = Number(process.env.TALK_BARGE_IN_DEBOUNCE_MS || 300);
 
+// The debounce above only filters brief blips — it doesn't help when someone's
+// mic is picking up a bit of the bot's own TTS output off their speakers
+// (no/imperfect echo cancellation), since that's sustained for as long as the
+// bot keeps talking, same as real speech would be. Confirmed directly in logs:
+// barge-in was firing within 0.5-2.6s of nearly every single reply, almost
+// always with no real transcript in between. Acoustic bleed through a room is
+// real signal loss, so it should come through measurably quieter than someone
+// actually talking into their mic — require the accumulated RMS over the
+// debounce window to also clear this floor. Raw int16 PCM scale (0-32768), not
+// normalized. No real audio to calibrate against ahead of time, so every
+// decision logs its actual computed value — tune this from real numbers once
+// there's a session's worth of them, don't guess twice.
+const BARGE_IN_MIN_RMS = Number(process.env.TALK_BARGE_IN_MIN_RMS || 300);
+
 const KEEP_UPLOADS = process.env.KEEP_UPLOADS === '1';
 
 // Shared config loading
@@ -110,6 +124,7 @@ class GuildManager {
         talkActive: false,
         botSpeaking: false,
         speakingUsers: new Set(), // userIds Discord currently reports as transmitting
+        speakingEnergy: new Map(), // userId -> { sumSq, count } accumulated during the current speaking burst
         utterBuf: new Map() // userId -> { chunks: number[], len: number, name: string }
       });
     }
@@ -271,15 +286,24 @@ class GuildManager {
       if (userObj && userObj.bot) return;
 
       state.speakingUsers.add(userId);
+      state.speakingEnergy.set(userId, { sumSq: 0, count: 0 });
 
       // Barge-in: if Balthazar is talking and a human starts, yield the floor —
-      // but only if they're still actually talking after a short debounce, not
-      // just a blip. See BARGE_IN_DEBOUNCE_MS above for why.
+      // but only if they're still actually talking after a short debounce (not
+      // just a blip) AND it's loud enough to plausibly be them, not the bot's
+      // own voice bleeding back in through their mic. See BARGE_IN_DEBOUNCE_MS /
+      // BARGE_IN_MIN_RMS above for why.
       if (state.talkActive && state.botSpeaking && this.talkManager) {
         setTimeout(() => {
           const s = this.getGuildState(guildId);
-          if (s.talkActive && s.botSpeaking && s.speakingUsers.has(userId)) {
+          if (!s.talkActive || !s.botSpeaking || !s.speakingUsers.has(userId)) return;
+          const e = s.speakingEnergy.get(userId);
+          const rms = e && e.count > 0 ? Math.sqrt(e.sumSq / e.count) : 0;
+          console.log(`[voice][${guildId}] barge-in candidate from ${userId}: rms=${rms.toFixed(0)} (min=${BARGE_IN_MIN_RMS})`);
+          if (rms >= BARGE_IN_MIN_RMS) {
             this.talkManager.bargeIn(guildId);
+          } else {
+            console.log(`[voice][${guildId}] barge-in suppressed — too quiet, likely echo bleed`);
           }
         }, BARGE_IN_DEBOUNCE_MS);
       }
@@ -306,6 +330,15 @@ class GuildManager {
         const buf = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
         const pcm = new Int16Array(buf.buffer, buf.byteOffset, buf.length / 2);
         this.writeToUserRing(guildId, userId, pcm);
+        // Fed to the barge-in energy check above — reset fresh on every speaking
+        // 'start', accumulated here regardless of which 'start' originally set up
+        // this decoder (a currently-live stream keeps feeding whatever the latest
+        // reset accumulator is).
+        const energy = state.speakingEnergy.get(userId);
+        if (energy) {
+          for (let i = 0; i < pcm.length; i++) energy.sumSq += pcm[i] * pcm[i];
+          energy.count += pcm.length;
+        }
         // Live web-panel monitor: stream decoded audio only while a browser is watching.
         if (this.webUI && this.webUI.hasClients && this.webUI.hasClients()) {
           this.webUI.emitToAll('audio', { userId, data: buf.toString('base64') });
