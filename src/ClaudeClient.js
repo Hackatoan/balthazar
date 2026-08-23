@@ -2,6 +2,8 @@ const axios = require('axios');
 
 const API_URL = 'https://api.anthropic.com/v1/messages';
 
+const SKIP_TOKEN = '<<SKIP>>';
+
 const DEFAULT_PERSONA = [
   'You are Balthazar, a Discord voice-chat companion hanging out in a live voice call.',
   'Your replies are SPOKEN ALOUD by a text-to-speech voice, so:',
@@ -10,6 +12,13 @@ const DEFAULT_PERSONA = [
   '- Spell things out for speech (say "twenty twenty six", not "2026").',
   '- You are hearing imperfect speech-to-text transcripts; if something is garbled, roll with it or ask a short clarifying question.',
   'Do not narrate actions or describe yourself. Just say the reply.',
+  '',
+  'Not everything said nearby is directed at you. Before replying, look at the LAST line',
+  'of the transcript below (the newest thing said). Only actually reply if it is clearly',
+  'addressed to you — calls you by name, directly asks/tells you something, or is an',
+  'obvious continuation of a conversation you are already having with someone. If the',
+  'last line is people talking to each other, background noise that got transcribed as',
+  `words, or anything else not meant for you, respond with EXACTLY this and nothing else: ${SKIP_TOKEN}`,
 ].join('\n');
 
 // Reuses the Claude Code OAuth token (sk-ant-oat...) from the Lamar/lamarlive setup.
@@ -62,6 +71,10 @@ class ClaudeClient {
       const blocks = res.data?.content || [];
       let text = blocks.filter((b) => b.type === 'text').map((b) => b.text).join(' ').trim();
       text = text.replace(/^\s*balthazar\s*:\s*/i, '').trim();
+      if (text.toUpperCase().startsWith(SKIP_TOKEN)) {
+        console.log('[claude] not addressed, skipping (model decided from context)');
+        return '';
+      }
       return text;
     } catch (e) {
       const status = e?.response?.status;

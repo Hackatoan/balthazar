@@ -198,7 +198,7 @@ class TalkManager {
     const context = this.guildManager.getCallContext(guildId);
     const reply = await this.brain.reply(s.history, context);
     if (myTurn !== s.turn) { console.log('[talk] superseded, dropping reply'); return; }
-    if (!reply) { console.log('[talk] empty gemini reply'); return; }
+    if (!reply) { console.log('[talk] no reply (brain skipped or errored — see [claude]/[gemini] log above)'); return; }
     console.log(`[talk] reply: "${reply}"`);
 
     this._pushHistory(guildId, { name: 'Balthazar', text: reply, bot: true });
