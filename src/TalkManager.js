@@ -1,6 +1,3 @@
-const os = require('os');
-const fs = require('fs');
-const path = require('path');
 const axios = require('axios');
 const GeminiClient = require('./GeminiClient');
 const ClaudeClient = require('./ClaudeClient');
@@ -213,28 +210,24 @@ class TalkManager {
     const s = this._state(guildId);
     if (!pcm || myTurn !== s.turn) return; // barge-in happened while synthesizing
 
-    const dir = path.join(os.tmpdir(), 'balthazar-tts');
-    try { fs.mkdirSync(dir, { recursive: true }); } catch (_) {}
-    const file = path.join(dir, `tts-${guildId}-${Date.now()}.pcm`);
-    try { fs.writeFileSync(file, pcm); } catch (e) { console.warn('[talk] write tts:', e?.message); return; }
-
-    const cleanup = () => { try { fs.unlinkSync(file); } catch (_) {} };
-
+    // Used to round-trip through a temp file (write, then read it back) even
+    // though the whole buffer is already sitting right here in memory — pure
+    // overhead, and on a host where swap is routinely maxed (real disk I/O
+    // pressure, not just idle allocation), that's a plausible source of longer
+    // replies glitching partway through. Feed it straight to the player instead.
     console.log(`[talk] speaking (${pcm.length} bytes) in ${guildId}`);
     this.guildManager.setBotSpeaking(guildId, true);
-    this.guildManager.playRawPcmFromDisk(
+    this.guildManager.playRawPcmBuffer(
       guildId,
-      file,
+      pcm,
       null,
       () => { // onEnd
         this.guildManager.setBotSpeaking(guildId, false);
         s.lastRespondedAt = Date.now();
-        cleanup();
       },
       (err) => { // onError
         console.warn('[talk] play error:', err?.message || err);
         this.guildManager.setBotSpeaking(guildId, false);
-        cleanup();
       }
     );
   }
