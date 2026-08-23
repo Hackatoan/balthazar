@@ -125,6 +125,7 @@ class TalkManager {
 
   // Called when a user starts speaking while Balthazar is talking -> stop and yield.
   bargeIn(guildId) {
+    console.log(`[talk] barge-in — stopping mid-reply in ${guildId}`);
     const s = this._state(guildId);
     s.turn++;
     this.guildManager.stopSpeaking(guildId);

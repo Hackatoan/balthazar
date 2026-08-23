@@ -11,6 +11,16 @@ const CLIP_CHANNELS = 2;
 const MIN_STABLE_MS = 3000;
 const TOTAL_CLIP_SAMPLES = CLIP_SAMPLE_RATE * CLIP_CHANNELS * CLIP_SECONDS;
 
+// Discord's speaking.on('start') fires on ANY detected audio from a user's mic —
+// brief blips, background noise, someone else's own aside to a different person —
+// not just meaningful sustained speech. Barge-in used to act on it immediately and
+// unconditionally, so in a livelier/quicker conversation basically any of that
+// noise from ANYONE cut the bot off mid-reply, whether or not it was actually
+// meant to interrupt it. Wait this long to see if the person is STILL talking
+// before actually committing to the interruption — filters brief noise without
+// meaningfully hurting responsiveness for a genuine "ok stop, let me talk" case.
+const BARGE_IN_DEBOUNCE_MS = Number(process.env.TALK_BARGE_IN_DEBOUNCE_MS || 300);
+
 const KEEP_UPLOADS = process.env.KEEP_UPLOADS === '1';
 
 // Shared config loading
@@ -99,6 +109,7 @@ class GuildManager {
         // /talk conversational mode
         talkActive: false,
         botSpeaking: false,
+        speakingUsers: new Set(), // userIds Discord currently reports as transmitting
         utterBuf: new Map() // userId -> { chunks: number[], len: number, name: string }
       });
     }
@@ -259,9 +270,18 @@ class GuildManager {
       const userObj = this.client.users.cache.get(userId);
       if (userObj && userObj.bot) return;
 
-      // Barge-in: if Balthazar is talking and a human starts, yield the floor.
+      state.speakingUsers.add(userId);
+
+      // Barge-in: if Balthazar is talking and a human starts, yield the floor —
+      // but only if they're still actually talking after a short debounce, not
+      // just a blip. See BARGE_IN_DEBOUNCE_MS above for why.
       if (state.talkActive && state.botSpeaking && this.talkManager) {
-        this.talkManager.bargeIn(guildId);
+        setTimeout(() => {
+          const s = this.getGuildState(guildId);
+          if (s.talkActive && s.botSpeaking && s.speakingUsers.has(userId)) {
+            this.talkManager.bargeIn(guildId);
+          }
+        }, BARGE_IN_DEBOUNCE_MS);
       }
 
       if (state.activeStreams && state.activeStreams.has(userId)) return;
@@ -307,6 +327,11 @@ class GuildManager {
         utter = null;
       });
       decoder.on('error', () => { if (state.activeStreams) state.activeStreams.delete(userId); });
+    });
+
+    receiver.speaking.on('end', (userId) => {
+      const state = this.getGuildState(guildId);
+      state.speakingUsers.delete(userId);
     });
   }
 
