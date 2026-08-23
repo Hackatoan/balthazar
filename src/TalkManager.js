@@ -12,6 +12,12 @@ const ALWAYS_RESPOND = process.env.TALK_ALWAYS_RESPOND === '1';
 const FOLLOWUP_MS = Number(process.env.TALK_FOLLOWUP_MS || 25000);
 const HISTORY_MAX = Number(process.env.TALK_HISTORY || 12);
 const MIN_CHARS = Number(process.env.TALK_MIN_CHARS || 2);
+// History (s.history) only ever grows/caps at HISTORY_MAX — nothing clears it on
+// its own, so after a lull the bot can still be carrying whatever it was talking
+// about several minutes ago into a completely unrelated new exchange. If it's
+// been this long since Balthazar last actually replied, wipe the slate before
+// processing the next utterance instead of dragging stale context forward.
+const IDLE_RESET_MS = Number(process.env.TALK_IDLE_RESET_MS || 15000);
 
 // Balthazar hears his name; whisper mangles it badly (e.g. "Beth Azar",
 // "South Azar", "Balthasar"), so we match fuzzily by edit distance.
@@ -184,6 +190,12 @@ class TalkManager {
     const text = await this._transcribe(pcm48kStereo);
     if (!text) { console.log(`[talk] ${name}: <no transcript>`); return; }
     console.log(`[talk] heard ${name}: "${text}"`);
+
+    const s0 = this._state(guildId);
+    if (s0.lastRespondedAt > 0 && Date.now() - s0.lastRespondedAt > IDLE_RESET_MS) {
+      console.log(`[talk] context reset — ${((Date.now() - s0.lastRespondedAt) / 1000).toFixed(1)}s since last reply`);
+      s0.history = [];
+    }
 
     this._pushHistory(guildId, { name, text, bot: false });
     try {
