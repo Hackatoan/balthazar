@@ -4,7 +4,6 @@ const prism = require('prism-media');
 const fs = require('fs');
 const path = require('path');
 const wav = require('wav');
-const { Readable } = require('stream');
 
 const CLIP_SECONDS = 30;
 const CLIP_SAMPLE_RATE = 48000;
@@ -498,18 +497,7 @@ class GuildManager {
   // that subprocess is exactly what was glitching the bot's own voice mid-reply.
   // StreamType.Raw skips ffmpeg entirely: @discordjs/opus encodes the (already
   // final-format) PCM in-process, no subprocess, nothing to starve mid-stream.
-  //
-  // Takes the PCM as an in-memory Buffer, not a file path. Used to round-trip
-  // through a temp file (write, then fs.createReadStream it back) even though the
-  // whole buffer was already sitting in memory — pure overhead, and on a host
-  // where swap is routinely at 511/512MB (real, ongoing disk I/O pressure, not
-  // just allocated-and-idle), a slow read partway through a longer reply lines up
-  // exactly with "cuts out after a bit of talking": a short reply can finish
-  // inside one buffered read, a longer one needs repeated reads over time, so it
-  // only takes one of those hitting contended I/O to glitch mid-stream.
-  // Readable.from() on a Buffer emits it as a single chunk, immediately available
-  // — no I/O wait, ever, since nothing is read from disk during playback at all.
-  async playRawPcmBuffer(guildId, pcmBuffer, onStart, onEnd, onError) {
+  async playRawPcmFromDisk(guildId, filePath, onStart, onEnd, onError) {
     try {
       const state = this.getGuildState(guildId);
       if (!state.currentConnection) throw new Error('No voice connection');
@@ -519,7 +507,7 @@ class GuildManager {
         try { state.currentConnection.subscribe(state.currentPlayer); } catch (_) {}
       }
 
-      const resource = createAudioResource(Readable.from(pcmBuffer), { inputType: StreamType.Raw });
+      const resource = createAudioResource(fs.createReadStream(filePath), { inputType: StreamType.Raw });
 
       const started = () => { onStart && onStart(); try { state.currentPlayer.off(AudioPlayerStatus.Playing, started); } catch (_) {} };
       const ended = () => { onEnd && onEnd(); try { state.currentPlayer.off(AudioPlayerStatus.Idle, ended); } catch (_) {} };
