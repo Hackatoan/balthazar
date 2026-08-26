@@ -8,6 +8,7 @@ const WebUI = require('./WebUI');
 const GuildManager = require('./GuildManager');
 const CommandManager = require('./CommandManager');
 const TalkManager = require('./TalkManager');
+const { LANGS } = require('./lang');
 
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN || '';
 
@@ -32,8 +33,16 @@ const talkCommand = new SlashCommandBuilder()
   .setDescription('Toggle Balthazar conversational voice mode on/off')
   .toJSON();
 
+const languageCommand = new SlashCommandBuilder()
+  .setName('language')
+  .setDescription('Set the language Balthazar replies in for this server')
+  .addStringOption((o) =>
+    o.setName('language').setDescription('Language Balthazar will talk in').setRequired(true)
+      .addChoices(...Object.entries(LANGS).map(([value, { label }]) => ({ name: label, value }))))
+  .toJSON();
+
 async function registerTalkCommand(guild) {
-  try { await guild.commands.set([talkCommand]); }
+  try { await guild.commands.set([talkCommand, languageCommand]); }
   catch (e) { console.warn(`[slash] register failed for ${guild.id}: ${e?.message || e}`); }
 }
 
@@ -126,9 +135,17 @@ client.on('messageCreate', async (message) => {
 
 client.on('interactionCreate', async (interaction) => {
   try {
-    if (!interaction.isChatInputCommand() || interaction.commandName !== 'talk') return;
+    if (!interaction.isChatInputCommand()) return;
+    if (!['talk', 'language'].includes(interaction.commandName)) return;
     if (!interaction.guild) {
       await interaction.reply({ content: 'Use this in a server.', flags: MessageFlags.Ephemeral });
+      return;
+    }
+    if (interaction.commandName === 'language') {
+      const code = interaction.options.getString('language');
+      guildManager.setConfig(interaction.guild.id, 'language', code);
+      const label = (LANGS[code] || LANGS.en).label;
+      await interaction.reply({ content: `🌍 Balthazar will reply in **${label}** for this server.` });
       return;
     }
     if (!talkManager.configured) {

@@ -1,4 +1,5 @@
 const { GoogleGenerativeAI, HarmCategory, HarmBlockThreshold } = require('@google/generative-ai');
+const { langLine } = require('./lang');
 
 const DEFAULT_PERSONA = [
   'You are Balthazar, a Discord voice-chat companion hanging out in a live voice call.',
@@ -57,7 +58,8 @@ class GeminiClient {
       ctxLine +
       'Here is the recent voice chat (speech-to-text, may be imperfect):\n' +
       lines.join('\n') +
-      '\n\nReply as Balthazar with one or two short spoken sentences.';
+      '\n\nReply as Balthazar with one or two short spoken sentences.' +
+      langLine(context && context.language);
 
     try {
       const result = await this.model.generateContent(prompt);

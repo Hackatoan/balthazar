@@ -208,7 +208,8 @@ class TalkManager {
     const s = this._state(guildId);
     const myTurn = ++s.turn; // claim this turn; a newer utterance or barge-in supersedes
 
-    const context = this.guildManager.getCallContext(guildId);
+    const context = this.guildManager.getCallContext(guildId) || {};
+    context.language = this.guildManager.getConfig(guildId)?.language || 'en';
     const reply = await this.brain.reply(s.history, context);
     if (myTurn !== s.turn) { console.log('[talk] superseded, dropping reply'); return; }
     if (!reply) { console.log('[talk] empty gemini reply'); return; }

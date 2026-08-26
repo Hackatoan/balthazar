@@ -1,4 +1,5 @@
 const axios = require('axios');
+const { langLine } = require('./lang');
 
 const API_URL = 'https://api.anthropic.com/v1/messages';
 
@@ -38,7 +39,8 @@ class ClaudeClient {
       ctxLine +
       'Here is the recent voice chat (speech-to-text, may be imperfect):\n' +
       lines.join('\n') +
-      '\n\nReply as Balthazar with one or two short spoken sentences.';
+      '\n\nReply as Balthazar with one or two short spoken sentences.' +
+      langLine(context && context.language);
 
     try {
       const res = await axios.post(
