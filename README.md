@@ -1,56 +1,43 @@
-[![Buy Me A Coffee](https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png)](https://buymeacoffee.com/hackatoa)
-
 # Balthazar
 
-A Discord voice bot that streams audio to a web UI, transcribes speech using `faster-whisper`, and creates 30-second clips on command or voice trigger.
+A Discord voice bot that streams call audio to the browser, transcribes speech with Whisper, and captures clips.
+
+☕ **Support:** [Buy Me a Coffee](https://buymeacoffee.com/hackatoa)
+
+## Overview
+
+Balthazar joins a voice channel, streams the audio to a browser view, transcribes speech in real time with Whisper, and captures the last 30 seconds on command or a voice trigger. Includes a live talk/voice-call mode.
 
 ## Features
 
-- Joins the most active voice channel and streams live audio to a browser UI
-- Per-user 30s ring buffers with time-aligned mixing for clean clip captures
-- Supports multiple Discord servers simultaneously
-- Voice trigger: say "terry clip that" to create a clip
-- Clips posted to DM or a configured clip channel; files deleted after posting
+- Live audio streaming to the browser (WebRTC)
+- Real-time Whisper transcription
+- 30-second clip capture on command or voice trigger
+- Live voice-call mode (STT → LLM → TTS)
+- Per-guild `/language`
 
-## Commands
+## Tech Stack
 
-| Command | Description |
-|---|---|
-| `-clip` | Save the last 30 seconds as a clip |
-| `-dmtoggle` | Toggle whether clips are sent via DM |
-| `-setclip <channel>` | Set the clip output channel (server owner only) |
-| `-help` / `-commands` | Show all commands |
+Node.js · discord.js · Whisper · WebRTC · Docker
 
-## Requirements
-
-- Node.js 18+
-- Python 3.9+ (for the ASR server)
-- Docker (recommended)
-
-## Setup with Docker
-
-```bash
-git clone https://github.com/Hackatoan/balthazar.git
-cd balthazar
-cp .env.example .env   # fill in DISCORD_TOKEN at minimum
-docker compose up --build
-```
-
-- ASR server runs on port 5005
-- Bot + web UI on port 3000 — open `http://localhost:3000`
-
-## Manual setup
+## Development
 
 ```bash
 npm install
-python3 -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
-# Terminal 1:
-python whisper_server.py
-# Terminal 2:
-node src/index.js
+# set the required tokens in the environment, then:
+npm start
 ```
+
+## Deployment
+
+Docker on the homelab host; GHCR + Watchtower auto-deploy.
+
+## Support
+
+If this project is useful to you, consider supporting development:
+
+☕ **[Buy Me a Coffee](https://buymeacoffee.com/hackatoa)**
 
 ---
 
-[hackatoa.com](https://hackatoa.com) · [GitHub](https://github.com/Hackatoan) · [Buy Me A Coffee](https://buymeacoffee.com/hackatoa)
+Part of the **[Hackatoa](https://hackatoa.com)** ecosystem — self-hosted apps, browser games, and bots. · [All repositories »](https://github.com/Hackatoan)
