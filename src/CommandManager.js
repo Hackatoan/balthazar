@@ -34,8 +34,10 @@ class CommandManager {
           '- -unignorevc <channel_id|#mention>: Server owner only, remove a voice channel from ignore list',
           '- -listignorevc: List ignored voice channels',
           '- -clipbots: Server owner only, toggle including bot audio in clips (default OFF)',
+          '- -say <message>: Balthazar speaks the message aloud in the current voice channel (text-to-speech)',
           '',
           '- /clip [seconds] [title] [user]: Slash-command version of -clip.',
+          '- /say <message>: Slash-command version of -say.',
           '',
           '**Conversation**',
           '- /talk: Toggle voice conversation mode. When on, say "Balthazar ..." in the call and he talks back.',
@@ -162,6 +164,19 @@ class CommandManager {
         const cur = !!gcfg.clipBots;
         this.guildManager.setConfig(message.guild.id, 'clipBots', !cur);
         try { await message.reply(`Include bot users in clips: ${!cur ? 'ON' : 'OFF'}`); } catch (_) {}
+        return;
+      }
+
+      if (content === '-say' || content.startsWith('-say ')) {
+        const idx = rawContent.indexOf(' ');
+        const text = idx > 0 ? rawContent.slice(idx + 1).trim() : '';
+        if (!text) { try { await message.reply('Usage: -say <message>'); } catch (_) {} return; }
+        const state = this.guildManager.getGuildState(message.guild.id);
+        if (!state.currentChannelId) { try { await message.reply('Not currently in a voice channel.'); } catch (_) {} return; }
+        const talkManager = this.guildManager.talkManager;
+        if (!talkManager) { try { await message.reply('Speech isn\'t available right now.'); } catch (_) {} return; }
+        talkManager.speakText(message.guild.id, text);
+        try { await message.react('🗣️'); } catch (_) {}
         return;
       }
 

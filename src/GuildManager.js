@@ -3,8 +3,10 @@ const { spawn } = require('child_process');
 const { PassThrough } = require('stream');
 const prism = require('prism-media');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const wav = require('wav');
+const axios = require('axios');
 
 // How much history the per-user ring buffers retain. A clip request can ask
 // for anything up to this; it just can't reach further back than what's kept.
@@ -43,6 +45,27 @@ function normalizeInPlace(float32arr) {
   if (gain > NORMALIZE_MAX_GAIN) gain = NORMALIZE_MAX_GAIN;
   if (gain === 1) return;
   for (let i = 0; i < float32arr.length; i++) float32arr[i] *= gain;
+}
+
+// Pulls the raw PCM samples out of a standard RIFF/WAVE file (walks chunks
+// looking for 'data' rather than assuming a fixed 44-byte header, since not
+// every WAV writer omits extra chunks). Our own clips are always 48kHz
+// stereo s16le, which is exactly what playRawPcmFromDisk expects.
+function extractPcmFromWav(buffer) {
+  if (buffer.length < 12 || buffer.toString('ascii', 0, 4) !== 'RIFF' || buffer.toString('ascii', 8, 12) !== 'WAVE') {
+    return null;
+  }
+  let offset = 12;
+  while (offset + 8 <= buffer.length) {
+    const chunkId = buffer.toString('ascii', offset, offset + 4);
+    const chunkSize = buffer.readUInt32LE(offset + 4);
+    const bodyStart = offset + 8;
+    if (chunkId === 'data') {
+      return buffer.subarray(bodyStart, Math.min(bodyStart + chunkSize, buffer.length));
+    }
+    offset = bodyStart + chunkSize + (chunkSize % 2); // chunks are word-aligned
+  }
+  return null;
 }
 
 // Discord's speaking.on('start') fires on ANY detected audio from a user's mic —
@@ -310,6 +333,13 @@ class GuildManager {
     try {
       state.currentConnection.on('stateChange', (oldS, newS) => {
         console.log(`[voice][${guildId}] connection stateChange: ${oldS?.status} -> ${newS?.status}`);
+      });
+      // Without this, a networking-layer hiccup (Discord voice gateway edge error,
+      // e.g. a transient Cloudflare 521) throws as an unhandled 'error' event and
+      // takes down the entire process — not just this one guild's voice session.
+      // Confirmed in production: exactly that crashed the bot process once.
+      state.currentConnection.on('error', (err) => {
+        console.warn(`[voice][${guildId}] connection error: ${err?.message || err}`);
       });
     } catch (_) {}
 
@@ -720,7 +750,14 @@ class GuildManager {
 
       const resource = createAudioResource(fs.createReadStream(filePath), { inputType: StreamType.Raw });
 
-      const started = () => { onStart && onStart(); try { state.currentPlayer.off(AudioPlayerStatus.Playing, started); } catch (_) {} };
+      const started = () => {
+        onStart && onStart();
+        try { state.currentPlayer.off(AudioPlayerStatus.Playing, started); } catch (_) {}
+        // Separate read of the same file, paced on its own timer — deliberately NOT
+        // sharing the fs.createReadStream() above, so a slow/eager dashboard listener
+        // can never affect the actual Discord playback timing.
+        try { this.broadcastLivePcm(guildId, fs.readFileSync(filePath), this.client.user?.id); } catch (_) {}
+      };
       const ended = () => { onEnd && onEnd(); try { state.currentPlayer.off(AudioPlayerStatus.Idle, ended); } catch (_) {} };
       try { state.currentPlayer.removeAllListeners(AudioPlayerStatus.Playing); } catch (_) {}
       try { state.currentPlayer.removeAllListeners(AudioPlayerStatus.Idle); } catch (_) {}
@@ -734,6 +771,56 @@ class GuildManager {
 
       state.currentPlayer.play(resource);
     } catch (e) {
+      if (onError) onError(e);
+    }
+  }
+
+  // Streams a PCM buffer (48kHz stereo s16le) to any connected dashboard clients
+  // over the same 'audio' channel used for live speaker monitoring, tagged with
+  // speakerId (the bot's own user id — it's already a member of the channel it
+  // joined, so it shows up as a normal row in the dashboard's member/volume list).
+  // Paced in 20ms chunks on a timer so it plays back at roughly real-time speed
+  // instead of arriving all at once.
+  broadcastLivePcm(guildId, buffer, speakerId) {
+    if (!speakerId || !this.webUI || !this.webUI.hasClients || !this.webUI.hasClients()) return;
+    const bytesPerSample = 2; // s16le
+    const frameBytes = CLIP_CHANNELS * bytesPerSample;
+    const chunkMs = 20;
+    let chunkBytes = Math.round((CLIP_SAMPLE_RATE * frameBytes * chunkMs) / 1000);
+    chunkBytes -= chunkBytes % frameBytes; // stay frame-aligned
+    let offset = 0;
+    const timer = setInterval(() => {
+      if (offset >= buffer.length) { clearInterval(timer); return; }
+      const end = Math.min(offset + chunkBytes, buffer.length);
+      const chunk = buffer.subarray(offset, end);
+      offset = end;
+      try { this.webUI.emitToAll('audio', { userId: speakerId, data: chunk.toString('base64') }); } catch (_) {}
+    }, chunkMs);
+  }
+
+  // Downloads a previously-posted clip (Discord CDN URL, or our own /clips/ URL)
+  // and plays it back into the voice channel — a "replay this into the call"
+  // action from the dashboard's clip list, separate from just listening to it
+  // locally in the browser's <audio> tag.
+  async playClipIntoChannel(guildId, url, onStart, onEnd, onError) {
+    try {
+      const res = await axios.get(url, { responseType: 'arraybuffer', timeout: 20000 });
+      const pcm = extractPcmFromWav(Buffer.from(res.data));
+      if (!pcm) throw new Error('Could not read clip audio (not a recognized WAV)');
+
+      const dir = path.join(os.tmpdir(), 'balthazar-replay');
+      fs.mkdirSync(dir, { recursive: true });
+      const file = path.join(dir, `replay-${guildId}-${Date.now()}.pcm`);
+      fs.writeFileSync(file, pcm);
+      const cleanup = () => { try { fs.unlinkSync(file); } catch (_) {} };
+
+      await this.playRawPcmFromDisk(guildId, file,
+        onStart,
+        () => { cleanup(); onEnd && onEnd(); },
+        (err) => { cleanup(); onError && onError(err); }
+      );
+    } catch (e) {
+      console.warn(`[voice][${guildId}] clip replay error: ${e?.message || e}`);
       if (onError) onError(e);
     }
   }

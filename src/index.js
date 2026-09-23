@@ -52,8 +52,14 @@ const clipCommand = new SlashCommandBuilder()
   .addUserOption((o) => o.setName('user').setDescription('Deliver to this user instead of the clip channel').setRequired(false))
   .toJSON();
 
+const sayCommand = new SlashCommandBuilder()
+  .setName('say')
+  .setDescription('Balthazar speaks a message aloud in the current voice channel')
+  .addStringOption((o) => o.setName('message').setDescription('What Balthazar should say').setRequired(true))
+  .toJSON();
+
 async function registerTalkCommand(guild) {
-  try { await guild.commands.set([talkCommand, languageCommand, clipCommand]); }
+  try { await guild.commands.set([talkCommand, languageCommand, clipCommand, sayCommand]); }
   catch (e) { console.warn(`[slash] register failed for ${guild.id}: ${e?.message || e}`); }
 }
 
@@ -97,6 +103,22 @@ webUI.onMicAudio = (payload) => {
 webUI.onMicStop = (payload) => {
   if (!payload || !payload.guildId) return;
   guildManager.stopWebMic(payload.guildId);
+};
+
+webUI.onSayText = (payload, socket) => {
+  if (!payload || !payload.guildId || !payload.text) return;
+  talkManager.speakText(payload.guildId, payload.text).then((ok) => {
+    if (!ok) socket.emit('say_error', 'Not in a voice channel, or message was empty.');
+  });
+};
+
+webUI.onReplayClip = (payload, socket) => {
+  if (!payload || !payload.guildId || !payload.url) return;
+  guildManager.playClipIntoChannel(payload.guildId, payload.url,
+    () => socket.emit('replay_started'),
+    () => socket.emit('replay_ended'),
+    (err) => socket.emit('replay_error', err?.message || String(err))
+  );
 };
 
 webUI.onClientConnected = (socket) => {
@@ -176,7 +198,7 @@ client.on('messageCreate', async (message) => {
 client.on('interactionCreate', async (interaction) => {
   try {
     if (!interaction.isChatInputCommand()) return;
-    if (!['talk', 'language', 'clip'].includes(interaction.commandName)) return;
+    if (!['talk', 'language', 'clip', 'say'].includes(interaction.commandName)) return;
     if (!interaction.guild) {
       await interaction.reply({ content: 'Use this in a server.', flags: MessageFlags.Ephemeral });
       return;
@@ -201,6 +223,18 @@ client.on('interactionCreate', async (interaction) => {
       const titleNote = title ? ` — ${title}` : '';
       await interaction.reply(`🎬 Clipping the last ${seconds || 30}s${titleNote}...`);
       guildManager.handleVoiceClipCommand(guildId, interaction.user.username, interaction.user.id, title, targetUser ? targetUser.id : null, interaction.channelId, seconds);
+      return;
+    }
+    if (interaction.commandName === 'say') {
+      const guildId = interaction.guild.id;
+      const state = guildManager.getGuildState(guildId);
+      if (!state.currentChannelId) {
+        await interaction.reply({ content: 'Not currently in a voice channel.', flags: MessageFlags.Ephemeral });
+        return;
+      }
+      const text = interaction.options.getString('message');
+      await interaction.reply(`🗣️ Saying: ${text}`);
+      talkManager.speakText(guildId, text);
       return;
     }
     if (!talkManager.configured) {

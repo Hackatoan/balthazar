@@ -66,6 +66,14 @@ class WebUI {
         if (this.onMicStop) this.onMicStop(payload, socket);
       });
 
+      socket.on('say_text', (payload) => {
+        if (this.onSayText) this.onSayText(payload, socket);
+      });
+
+      socket.on('replay_clip', (payload) => {
+        if (this.onReplayClip) this.onReplayClip(payload, socket);
+      });
+
       // Lets index.js push a new connection's initial state (clip history,
       // saved per-user volumes) without WebUI needing to know what those are.
       if (this.onClientConnected) this.onClientConnected(socket);

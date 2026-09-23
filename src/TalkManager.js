@@ -219,6 +219,21 @@ class TalkManager {
     await this._speak(guildId, reply, myTurn);
   }
 
+  // Manual one-off TTS — not tied to a conversational turn like onUtterance's
+  // replies are. Used by the -say / /say commands and the dashboard's speak box.
+  // Only needs Piper (TTS) to be reachable, not a configured LLM brain, so it
+  // works even when talk mode itself is unconfigured.
+  async speakText(guildId, text) {
+    const clean = String(text || '').trim();
+    if (!clean) return false;
+    if (!this.guildManager.getGuildState(guildId).currentChannelId) return false;
+    const s = this._state(guildId);
+    const myTurn = ++s.turn; // claim the turn so this can't be dropped as "superseded"
+    this._pushHistory(guildId, { name: 'Balthazar', text: clean, bot: true });
+    await this._speak(guildId, clean, myTurn);
+    return true;
+  }
+
   async _speak(guildId, text, myTurn) {
     // Piper's /synthesize now returns raw 48kHz stereo s16le PCM directly (see
     // piper_server.py) — already in the exact format StreamType.Raw needs, no
@@ -235,6 +250,11 @@ class TalkManager {
     const cleanup = () => { try { fs.unlinkSync(file); } catch (_) {} };
 
     console.log(`[talk] speaking (${pcm.length} bytes) in ${guildId}`);
+    try {
+      this.webUI?.emitToAll('transcript', {
+        guildId, userId: this.guildManager.client?.user?.id, username: 'Balthazar', text, timestamp: Date.now()
+      });
+    } catch (_) {}
     this.guildManager.setBotSpeaking(guildId, true);
     this.guildManager.playRawPcmFromDisk(
       guildId,

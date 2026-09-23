@@ -79,6 +79,8 @@ function getGuildContainer(guildId) {
   const clipsEl = container.querySelector('.guild-clips');
   const clipBtn = container.querySelector('.clip-btn');
   const micBtn = container.querySelector('.mic-btn');
+  const sayInput = container.querySelector('.say-input');
+  const sayBtn = container.querySelector('.say-btn');
   const clipChannelSelector = container.querySelector('.clip-channel-selector');
 
   document.getElementById('guilds-container').appendChild(container);
@@ -166,6 +168,18 @@ function getGuildContainer(guildId) {
     });
   }
 
+  if (sayBtn && sayInput) {
+    const doSay = () => {
+      const text = sayInput.value.trim();
+      if (!text) return;
+      socket.emit('say_text', { guildId, text });
+      showToast('Speaking...');
+      sayInput.value = '';
+    };
+    sayBtn.addEventListener('click', doSay);
+    sayInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') doSay(); });
+  }
+
   if (channelEl) {
     channelEl.addEventListener('click', () => {
       g.playMode = 'all';
@@ -243,6 +257,7 @@ function renderClips(guildId, items) {
 
     html += `<div style="display:flex;gap:8px;font-size:0.85em;">`;
     html += `<button class="copy-btn" data-url="${safeUrl}" style="background:#4f545c;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;">Copy</button>`;
+    html += `<button class="replay-btn" data-url="${safeUrl}" data-guild="${guildId}" style="background:#3a994e;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;" title="Play this back into the voice channel">▶ Play in channel</button>`;
     html += `<button class="assign-btn" data-url="${safeUrl}" data-title="${safeName}" data-guild="${guildId}" style="background:#5865f2;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;" title="Assign to selected user">Assign</button>`;
     html += `<button class="remove-btn" data-url="${safeUrl}" data-guild="${guildId}" style="background:#ed4245;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;" title="Remove from selected user">Remove</button>`;
     html += `</div>`;
@@ -279,6 +294,15 @@ document.addEventListener('click', async (e) => {
     return;
   }
 
+  const btnReplay = e.target.closest('.replay-btn');
+  if (btnReplay) {
+    const url = btnReplay.getAttribute('data-url');
+    const guildId = btnReplay.getAttribute('data-guild');
+    socket.emit('replay_clip', { guildId, url });
+    showToast('Playing in voice channel...');
+    return;
+  }
+
   const btnAssign = e.target.closest('.assign-btn');
   if (btnAssign) {
     const url = btnAssign.getAttribute('data-url');
@@ -306,6 +330,11 @@ document.addEventListener('click', async (e) => {
     return;
   }
 });
+
+socket.on('say_error', (msg) => showToast(msg || 'Speak failed'));
+socket.on('replay_started', () => showToast('Now playing in voice channel'));
+socket.on('replay_ended', () => showToast('Playback finished'));
+socket.on('replay_error', (msg) => showToast(`Replay failed: ${msg || ''}`));
 
 socket.on('transcript', (data) => {
   if (!data || !data.guildId) return;
