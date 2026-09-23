@@ -41,8 +41,19 @@ const languageCommand = new SlashCommandBuilder()
       .addChoices(...Object.entries(LANGS).map(([value, { label }]) => ({ name: label, value }))))
   .toJSON();
 
+// Actual clamping to [MIN_CLIP_SECONDS, buffer size] happens in
+// GuildManager.handleVoiceClipCommand — these bounds just keep the Discord UI honest.
+const clipCommand = new SlashCommandBuilder()
+  .setName('clip')
+  .setDescription('Create a clip of recent voice')
+  .addIntegerOption((o) =>
+    o.setName('seconds').setDescription('How many seconds back to grab (default 30, up to 120)').setMinValue(5).setMaxValue(120).setRequired(false))
+  .addStringOption((o) => o.setName('title').setDescription('Optional title for the clip').setRequired(false))
+  .addUserOption((o) => o.setName('user').setDescription('Deliver to this user instead of the clip channel').setRequired(false))
+  .toJSON();
+
 async function registerTalkCommand(guild) {
-  try { await guild.commands.set([talkCommand, languageCommand]); }
+  try { await guild.commands.set([talkCommand, languageCommand, clipCommand]); }
   catch (e) { console.warn(`[slash] register failed for ${guild.id}: ${e?.message || e}`); }
 }
 
@@ -165,7 +176,7 @@ client.on('messageCreate', async (message) => {
 client.on('interactionCreate', async (interaction) => {
   try {
     if (!interaction.isChatInputCommand()) return;
-    if (!['talk', 'language'].includes(interaction.commandName)) return;
+    if (!['talk', 'language', 'clip'].includes(interaction.commandName)) return;
     if (!interaction.guild) {
       await interaction.reply({ content: 'Use this in a server.', flags: MessageFlags.Ephemeral });
       return;
@@ -175,6 +186,21 @@ client.on('interactionCreate', async (interaction) => {
       guildManager.setConfig(interaction.guild.id, 'language', code);
       const label = (LANGS[code] || LANGS.en).label;
       await interaction.reply({ content: `🌍 Balthazar will reply in **${label}** for this server.` });
+      return;
+    }
+    if (interaction.commandName === 'clip') {
+      const guildId = interaction.guild.id;
+      const state = guildManager.getGuildState(guildId);
+      if (!state.currentChannelId) {
+        await interaction.reply({ content: 'Not currently in a voice channel.', flags: MessageFlags.Ephemeral });
+        return;
+      }
+      const seconds = interaction.options.getInteger('seconds');
+      const title = interaction.options.getString('title') || '';
+      const targetUser = interaction.options.getUser('user');
+      const titleNote = title ? ` — ${title}` : '';
+      await interaction.reply(`🎬 Clipping the last ${seconds || 30}s${titleNote}...`);
+      guildManager.handleVoiceClipCommand(guildId, interaction.user.username, interaction.user.id, title, targetUser ? targetUser.id : null, interaction.channelId, seconds);
       return;
     }
     if (!talkManager.configured) {
