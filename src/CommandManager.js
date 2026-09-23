@@ -39,7 +39,7 @@ class CommandManager {
           '- /talk: Toggle voice conversation mode. When on, say "Balthazar ..." in the call and he talks back.',
           '',
           '**Voice Triggers**',
-          '- "Balthazar clip that"'
+          '- "Balthazar clip that" or just "clip that" / "clip it" / "clip this"'
         ].join('\n');
         try { await message.reply(helpText); } catch (_) {}
         return;

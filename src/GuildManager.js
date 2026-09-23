@@ -638,8 +638,11 @@ class GuildManager {
     const hasClip = /\bclip\b/.test(ctx);
     // czar/tzar alone near clip is strong enough (Whisper almost always renders the zar sound this way)
     const hasCzarWithClip = /\b(czar|tzar|azar)\b/.test(ctx) && hasClip;
+    // Bare "clip that" (or "clip it/this") also works on its own — no need to
+    // say Balthazar's name first, just like saying "-clip" in text.
+    const hasBareClipThat = /\bclip (that|it|this)\b/.test(ctx);
 
-    return (hasName && hasClip) || hasCzarWithClip;
+    return (hasName && hasClip) || hasCzarWithClip || hasBareClipThat;
   }
 
   shouldTriggerClipFromContext(guildId, userId) {
