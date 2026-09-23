@@ -253,7 +253,9 @@ class CommandManager {
         try { await message.reply(`Clip channel set to <#${chanId}>`); } catch (_) {}
         return;
       }
-    } catch (_) {}
+    } catch (e) {
+      console.error('[command] handleMessage error:', e);
+    }
   }
 }
 
