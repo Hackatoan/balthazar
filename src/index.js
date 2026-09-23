@@ -64,8 +64,37 @@ webUI.onSetClipChannel = (payload, socket) => {
 
 webUI.onClipRequest = (payload) => {
   if (!payload || !payload.guildId) return;
-  guildManager.handleVoiceClipCommand(payload.guildId, 'Web Panel', null, payload.title || '', null, null);
-  console.log(`[web] clip requested for ${payload.guildId}`);
+  guildManager.handleVoiceClipCommand(payload.guildId, 'Web Panel', null, payload.title || '', null, null, payload.seconds);
+  console.log(`[web] clip requested for ${payload.guildId} (${payload.seconds || 30}s)`);
+};
+
+webUI.onSetUserVolume = (payload) => {
+  if (!payload || !payload.guildId || !payload.userId) return;
+  guildManager.setUserVolume(payload.guildId, payload.userId, payload.volume);
+};
+
+webUI.onMicStart = (payload) => {
+  if (!payload || !payload.guildId) return;
+  guildManager.startWebMic(payload.guildId);
+};
+
+webUI.onMicAudio = (payload) => {
+  if (!payload || !payload.guildId || !payload.data) return;
+  guildManager.pushWebMicAudio(payload.guildId, Buffer.from(payload.data));
+};
+
+webUI.onMicStop = (payload) => {
+  if (!payload || !payload.guildId) return;
+  guildManager.stopWebMic(payload.guildId);
+};
+
+webUI.onClientConnected = (socket) => {
+  for (const guild of client.guilds.cache.values()) {
+    const clips = guildManager.getGuildClips(guild.id);
+    if (clips.length) socket.emit('clip_history', { guildId: guild.id, clips });
+    const volumes = guildManager.getUserVolumes(guild.id);
+    if (Object.keys(volumes).length) socket.emit('user_volumes', { guildId: guild.id, volumes });
+  }
 };
 
 webUI.onAssignClip = (payload) => {

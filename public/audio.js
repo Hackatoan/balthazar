@@ -10,6 +10,57 @@ socket.on('reconnect_attempt', () => {
 // Guild-specific state and UI elements
 const guildContainers = {}; // guildId -> { container, channelEl, membersEl, transcriptEl, clipsEl, playMode }
 const guildClipsData = {}; // guildId -> array of clip objects
+const userVolumes = {}; // userId -> 0..2, applied both to clips and the live listen mix below
+
+function refreshVolumeSliders() {
+  document.querySelectorAll('.vol-slider').forEach(s => {
+    const v = userVolumes[s.dataset.userid];
+    if (v != null) {
+      s.value = Math.round(v * 100);
+      s.title = `Volume (${Math.round(v * 100)}%)`;
+    }
+  });
+}
+
+// Dragging a volume slider shouldn't also fire the member row's click handler
+// (which switches the live-listen play mode to that user).
+document.addEventListener('mousedown', (e) => { if (e.target.closest('.vol-slider')) e.stopPropagation(); }, true);
+document.addEventListener('click', (e) => { if (e.target.closest('.vol-slider')) e.stopPropagation(); }, true);
+document.addEventListener('input', (e) => {
+  const slider = e.target.closest('.vol-slider');
+  if (!slider) return;
+  const userId = slider.dataset.userid;
+  const guildId = slider.dataset.guild;
+  const volume = Number(slider.value) / 100;
+  userVolumes[userId] = volume;
+  slider.title = `Volume (${slider.value}%)`;
+  socket.emit('set_user_volume', { guildId, userId, volume });
+});
+
+socket.on('user_volumes', ({ guildId, volumes }) => {
+  Object.assign(userVolumes, volumes || {});
+  refreshVolumeSliders();
+});
+socket.on('user_volume_updated', ({ userId, volume }) => {
+  userVolumes[userId] = volume;
+  refreshVolumeSliders();
+});
+
+// Dashboard reload: repopulate clip history from the server instead of
+// starting from an empty list every time the page is opened.
+socket.on('clip_history', ({ guildId, clips }) => {
+  if (!guildId || !Array.isArray(clips)) return;
+  const g = getGuildContainer(guildId);
+  if (!g) return;
+  const existingUrls = new Set(guildClipsData[guildId].map(c => c.url));
+  clips.forEach(c => {
+    if (!existingUrls.has(c.url)) {
+      guildClipsData[guildId].push(c);
+      existingUrls.add(c.url);
+    }
+  });
+  renderClips(guildId, guildClipsData[guildId]);
+});
 
 function getGuildContainer(guildId) {
   if (!guildId) return null;
@@ -27,12 +78,14 @@ function getGuildContainer(guildId) {
   const transcriptEl = container.querySelector('.guild-transcript');
   const clipsEl = container.querySelector('.guild-clips');
   const clipBtn = container.querySelector('.clip-btn');
+  const micBtn = container.querySelector('.mic-btn');
   const clipChannelSelector = container.querySelector('.clip-channel-selector');
 
   document.getElementById('guilds-container').appendChild(container);
 
   const g = {
-    guildId, container, channelEl, membersEl, transcriptEl, clipsEl, playMode: 'all'
+    guildId, container, channelEl, membersEl, transcriptEl, clipsEl, playMode: 'all',
+    micActive: false, micStream: null, micSource: null, micProcessor: null, micGainNode: null
   };
 
   guildContainers[guildId] = g;
@@ -47,10 +100,69 @@ function getGuildContainer(guildId) {
   if (clipBtn) {
     clipBtn.addEventListener('click', () => {
       try {
+        const secInput = prompt('How many seconds back should the clip go? (default 30, up to 120)', '30');
+        if (secInput === null) return;
+        let seconds = parseInt(secInput, 10);
+        if (!seconds || seconds <= 0) seconds = 30;
+        if (seconds > 120) seconds = 120;
         const title = prompt('Optional title for this clip? (Leave blank for default)') || '';
-        socket.emit('clip_request', { title, guildId });
-        showToast('Clipping last 30s...');
+        socket.emit('clip_request', { title, guildId, seconds });
+        showToast(`Clipping last ${seconds}s...`);
       } catch (_) {}
+    });
+  }
+
+  if (micBtn) {
+    micBtn.addEventListener('click', async () => {
+      if (!g.micActive) {
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({ audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+          if (audioCtx.state === 'suspended') await audioCtx.resume();
+          g.micStream = stream;
+          g.micSource = audioCtx.createMediaStreamSource(stream);
+          g.micProcessor = audioCtx.createScriptProcessor(4096, 1, 1);
+          g.micProcessor.onaudioprocess = (e) => {
+            const input = e.inputBuffer.getChannelData(0);
+            // Discord expects interleaved 48kHz stereo s16le — duplicate the
+            // mono mic input across both channels (matches how it decodes
+            // everyone else's mono mic on the way in).
+            const pcm = new Int16Array(input.length * 2);
+            for (let i = 0; i < input.length; i++) {
+              const s = Math.max(-1, Math.min(1, input[i]));
+              const v = s < 0 ? s * 32768 : s * 32767;
+              pcm[i * 2] = v;
+              pcm[i * 2 + 1] = v;
+            }
+            socket.emit('mic_audio', { guildId, data: pcm.buffer });
+          };
+          // A ScriptProcessorNode only fires once it's part of a live graph —
+          // route it through a silent gain node instead of straight to
+          // destination, so the mic doesn't also play back locally (feedback).
+          g.micGainNode = audioCtx.createGain();
+          g.micGainNode.gain.value = 0;
+          g.micSource.connect(g.micProcessor);
+          g.micProcessor.connect(g.micGainNode);
+          g.micGainNode.connect(audioCtx.destination);
+
+          socket.emit('mic_start', { guildId });
+          g.micActive = true;
+          micBtn.textContent = '🎤 Mic On';
+          micBtn.style.background = '#ed4245';
+          showToast('Mic live in voice channel');
+        } catch (e) {
+          showToast('Mic access denied or unavailable');
+        }
+      } else {
+        try { g.micProcessor && g.micProcessor.disconnect(); } catch (_) {}
+        try { g.micGainNode && g.micGainNode.disconnect(); } catch (_) {}
+        try { g.micSource && g.micSource.disconnect(); } catch (_) {}
+        try { g.micStream && g.micStream.getTracks().forEach(t => t.stop()); } catch (_) {}
+        socket.emit('mic_stop', { guildId });
+        g.micActive = false;
+        micBtn.textContent = '🎤 Mic Off';
+        micBtn.style.background = '#3a994e';
+        showToast('Mic stopped');
+      }
     });
   }
 
@@ -251,10 +363,10 @@ socket.on('update', data => {
     const div = document.createElement('div');
     div.className = 'member';
     div.dataset.userid = m.id;
-    const count = 0; // Simplified
+    const vol = userVolumes[m.id] != null ? userVolumes[m.id] : 1;
     div.innerHTML = `<img src="${m.avatar}" alt="avatar" style="width:32px;height:32px;border-radius:50%;margin-right:8px;">`+
       `<span style="margin-right:6px;">${m.username}</span>`+
-      `<span style="background:#5865f2;padding:2px 8px;border-radius:12px;font-size:0.85em;opacity:0.95;color:#fff;display:none;">${count}</span>`;
+      `<input type="range" class="vol-slider" min="0" max="200" value="${Math.round(vol * 100)}" data-userid="${m.id}" data-guild="${guildId}" title="Volume (${Math.round(vol * 100)}%)" style="width:70px;">`;
     g.membersEl.appendChild(div);
   });
 
@@ -396,9 +508,10 @@ function startAudioNode() {
       for (const userId in slices) {
         const s = slices[userId];
         if (!s) continue;
+        const vol = userVolumes[userId] != null ? userVolumes[userId] : 1;
         const idx = j * 2;
-        sumL += s[idx];
-        sumR += s[idx + 1];
+        sumL += s[idx] * vol;
+        sumR += s[idx + 1] * vol;
         contributors++;
       }
       if (contributors > 0) {

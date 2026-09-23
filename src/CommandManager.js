@@ -22,7 +22,7 @@ class CommandManager {
         const helpText = [
           '**Commands**',
           '- -help | -commands: Show this help',
-          '- -clip [title] or -clip @user [title]: Create a 30s clip of recent voice. Clips are delivered as Discord attachments (DM or configured clip channel).',
+          '- -clip [seconds] [title] or -clip @user [seconds] [title]: Create a clip of recent voice (default 30s, up to 120s of buffered history). Example: -clip 90 crazy moment. Clips are delivered as Discord attachments (DM or configured clip channel).',
           '- -clipfolder @user: List saved Discord-hosted clip links for the specified user (most recent first).',
           '- -addlast @user: Add the most recent clip to the mentioned user (registers Discord-hosted URL)',
           '- -beep: Play a short test beep in the current voice channel (diagnostics)',
@@ -165,16 +165,20 @@ class CommandManager {
 
       if (content === '-clip' || content.startsWith('-clip ')) {
         const parts = rawContent.split(/\s+/);
-        let title = '';
+        let rest = parts.slice(1);
         let targetUserId = null;
-        if (parts.length >= 2 && parts[1].startsWith('<@')) {
-          targetUserId = parts[1].replace(/[<@!>]/g, '');
-          title = parts.slice(2).join(' ').trim();
-        } else {
-          const idx = rawContent.indexOf(' ');
-          title = idx > 0 ? rawContent.slice(idx + 1).trim() : '';
+        if (rest[0] && rest[0].startsWith('<@')) {
+          targetUserId = rest[0].replace(/[<@!>]/g, '');
+          rest = rest.slice(1);
         }
-        this.guildManager.handleVoiceClipCommand(message.guild.id, message.author.username, message.author.id, title, targetUserId, message.channel.id);
+        let clipSeconds = null;
+        const secMatch = rest[0] && rest[0].match(/^(\d+)s?$/i);
+        if (secMatch) {
+          clipSeconds = Number(secMatch[1]);
+          rest = rest.slice(1);
+        }
+        const title = rest.join(' ').trim();
+        this.guildManager.handleVoiceClipCommand(message.guild.id, message.author.username, message.author.id, title, targetUserId, message.channel.id, clipSeconds);
         try { await message.react('🎬'); } catch (_) {}
         return;
       }

@@ -1,15 +1,49 @@
 const { joinVoiceChannel, createAudioPlayer, createAudioResource, NoSubscriberBehavior, StreamType, AudioPlayerStatus, VoiceConnectionStatus, entersState, EndBehaviorType } = require('@discordjs/voice');
 const { spawn } = require('child_process');
+const { PassThrough } = require('stream');
 const prism = require('prism-media');
 const fs = require('fs');
 const path = require('path');
 const wav = require('wav');
 
-const CLIP_SECONDS = 30;
+// How much history the per-user ring buffers retain. A clip request can ask
+// for anything up to this; it just can't reach further back than what's kept.
+const BUFFER_SECONDS = Number(process.env.CLIP_BUFFER_SECONDS || 120);
+const DEFAULT_CLIP_SECONDS = 30;
+const MIN_CLIP_SECONDS = 5;
 const CLIP_SAMPLE_RATE = 48000;
 const CLIP_CHANNELS = 2;
 const MIN_STABLE_MS = 3000;
-const TOTAL_CLIP_SAMPLES = CLIP_SAMPLE_RATE * CLIP_CHANNELS * CLIP_SECONDS;
+const TOTAL_BUFFER_SAMPLES = CLIP_SAMPLE_RATE * CLIP_CHANNELS * BUFFER_SECONDS;
+
+// Target peak for clip normalization (~-1dBFS, leaves a little headroom) and the
+// most we'll ever boost a quiet clip to reach it — capped so dead air / mic
+// noise floor doesn't get amplified into audible hiss.
+const NORMALIZE_TARGET_PEAK = 32767 * 0.891;
+const NORMALIZE_MAX_GAIN = 6;
+
+// Spreads simultaneous talkers across the stereo field (an even fan from -0.7 to
+// +0.7 pan) instead of dumping every voice onto the same center point — makes
+// overlapping speech separable by ear instead of one indistinguishable blob.
+function panGainsFor(index, total) {
+  if (total <= 1) return { l: Math.SQRT1_2, r: Math.SQRT1_2 };
+  const pan = -0.7 + (1.4 * index) / (total - 1);
+  const angle = ((pan + 1) * Math.PI) / 4; // 0..PI/2, equal-power law
+  return { l: Math.cos(angle), r: Math.sin(angle) };
+}
+
+function normalizeInPlace(float32arr) {
+  let peak = 0;
+  for (let i = 0; i < float32arr.length; i++) {
+    const abs = Math.abs(float32arr[i]);
+    if (abs > peak) peak = abs;
+  }
+  if (peak <= 0) return;
+  let gain = NORMALIZE_TARGET_PEAK / peak;
+  if (gain > NORMALIZE_MAX_GAIN) gain = NORMALIZE_MAX_GAIN;
+  if (gain === 1) return;
+  for (let i = 0; i < float32arr.length; i++) float32arr[i] *= gain;
+}
 
 // Discord's speaking.on('start') fires on ANY detected audio from a user's mic —
 // brief blips, background noise, someone else's own aside to a different person —
@@ -73,6 +107,24 @@ function saveUserClips() {
   catch (e) { console.error('[clips] save error:', e); }
 }
 loadUserClips();
+
+// Per-guild feed of every posted clip, so the dashboard can show clip history
+// again after a page reload instead of only what arrived while it was open.
+const GUILD_CLIPS_FILE = path.join(DATA_DIR, 'guild-clips.json');
+const MAX_GUILD_CLIPS = 200;
+let guildClips = {};
+function loadGuildClips() {
+  try {
+    if (fs.existsSync(GUILD_CLIPS_FILE)) {
+      guildClips = JSON.parse(fs.readFileSync(GUILD_CLIPS_FILE, 'utf8'));
+    }
+  } catch (e) { console.error('[clips] guild-clips load error:', e); }
+}
+function saveGuildClips() {
+  try { fs.writeFileSync(GUILD_CLIPS_FILE, JSON.stringify(guildClips, null, 2)); }
+  catch (e) { console.error('[clips] guild-clips save error:', e); }
+}
+loadGuildClips();
 
 class GuildManager {
   constructor(client, webUI) {
@@ -391,7 +443,7 @@ class GuildManager {
     const state = this.getGuildState(guildId);
     let ring = state.userRings.get(userId);
     if (!ring) {
-      ring = { buffer: new Int16Array(TOTAL_CLIP_SAMPLES), lastWriteTimeMs: 0, writePos: 0 };
+      ring = { buffer: new Int16Array(TOTAL_BUFFER_SAMPLES), lastWriteTimeMs: 0, writePos: 0 };
       state.userRings.set(userId, ring);
     }
     const buf = ring.buffer;
@@ -404,23 +456,23 @@ class GuildManager {
 
     if (gapMs > 100) {
       // Re-align to global clock based on Date.now()
-      const endIndex = Math.floor(now * 96) % TOTAL_CLIP_SAMPLES;
-      ring.writePos = (endIndex - pcmSamples + TOTAL_CLIP_SAMPLES) % TOTAL_CLIP_SAMPLES;
+      const endIndex = Math.floor(now * 96) % TOTAL_BUFFER_SAMPLES;
+      ring.writePos = (endIndex - pcmSamples + TOTAL_BUFFER_SAMPLES) % TOTAL_BUFFER_SAMPLES;
 
       // Clear the gap in the buffer from where we left off
       if (ring.lastWriteTimeMs > 0) {
         let gapSamplesToClear = Math.floor(gapMs * 96);
-        if (gapSamplesToClear > TOTAL_CLIP_SAMPLES) gapSamplesToClear = TOTAL_CLIP_SAMPLES;
-        let clearStartIndex = Math.floor(ring.lastWriteTimeMs * 96) % TOTAL_CLIP_SAMPLES;
+        if (gapSamplesToClear > TOTAL_BUFFER_SAMPLES) gapSamplesToClear = TOTAL_BUFFER_SAMPLES;
+        let clearStartIndex = Math.floor(ring.lastWriteTimeMs * 96) % TOTAL_BUFFER_SAMPLES;
         for (let i = 0; i < gapSamplesToClear; i++) {
-          buf[(clearStartIndex + i) % TOTAL_CLIP_SAMPLES] = 0;
+          buf[(clearStartIndex + i) % TOTAL_BUFFER_SAMPLES] = 0;
         }
       }
     }
 
     for (let i = 0; i < pcmSamples; i++) {
       buf[ring.writePos] = pcm16Stereo[i];
-      ring.writePos = (ring.writePos + 1) % TOTAL_CLIP_SAMPLES;
+      ring.writePos = (ring.writePos + 1) % TOTAL_BUFFER_SAMPLES;
     }
 
     // Since we write sequentially, the "effective" write time increments by exactly the duration of the packet
@@ -431,29 +483,78 @@ class GuildManager {
     }
   }
 
-  getLast30sMix(guildId, userIds) {
-    const state = this.getGuildState(guildId);
-    const result = new Float32Array(TOTAL_CLIP_SAMPLES);
-    const now = Date.now();
-    const cutoffMs = now - (CLIP_SECONDS * 1000);
-    const endIndex = Math.floor(now * 96) % TOTAL_CLIP_SAMPLES;
+  getUserVolumes(guildId) {
+    const gcfg = config.guilds[guildId] || {};
+    return gcfg.userVolumes || {};
+  }
 
-    let mixedCount = 0;
+  setUserVolume(guildId, userId, volume) {
+    let v = Number(volume);
+    if (!Number.isFinite(v)) v = 1;
+    v = Math.max(0, Math.min(2, v));
+    if (!config.guilds[guildId]) config.guilds[guildId] = {};
+    if (!config.guilds[guildId].userVolumes) config.guilds[guildId].userVolumes = {};
+    config.guilds[guildId].userVolumes[userId] = v;
+    saveConfig();
+    this.webUI.emitToAll('user_volume_updated', { guildId, userId, volume: v });
+    return v;
+  }
+
+  addGuildClip(guildId, clip) {
+    if (!guildClips[guildId]) guildClips[guildId] = [];
+    guildClips[guildId].unshift(clip);
+    if (guildClips[guildId].length > MAX_GUILD_CLIPS) guildClips[guildId].length = MAX_GUILD_CLIPS;
+    saveGuildClips();
+  }
+
+  getGuildClips(guildId) {
+    return guildClips[guildId] || [];
+  }
+
+  // Builds a `seconds`-long clip (clamped to what's actually buffered) mixed
+  // from each user's ring. Each speaker gets its own volume gain and a distinct
+  // stereo pan position — a separate channel per person — before landing in the
+  // shared mix, then the whole thing is peak-normalized so a clip isn't randomly
+  // quiet (one soft-spoken talker) or clipped (several loud talkers at once).
+  getMixedClip(guildId, userIds, requestedSeconds) {
+    const state = this.getGuildState(guildId);
+    const seconds = Math.max(MIN_CLIP_SECONDS, Math.min(BUFFER_SECONDS, Number(requestedSeconds) || DEFAULT_CLIP_SECONDS));
+    const totalSamples = CLIP_SAMPLE_RATE * CLIP_CHANNELS * seconds;
+    const result = new Float32Array(totalSamples);
+    const now = Date.now();
+    const cutoffMs = now - (seconds * 1000);
+    const endIndex = Math.floor(now * 96) % TOTAL_BUFFER_SAMPLES;
+    const volumes = this.getUserVolumes(guildId);
+
+    let panIndex = 0;
     for (const uid of userIds) {
       const ring = state.userRings.get(uid);
+      const { l: gainL, r: gainR } = panGainsFor(panIndex, userIds.length);
+      panIndex++;
       if (!ring) continue;
       if (ring.lastWriteTimeMs < cutoffMs) continue;
 
-      for (let i = 0; i < TOTAL_CLIP_SAMPLES; i++) {
-        const readIdx = (endIndex - TOTAL_CLIP_SAMPLES + i + TOTAL_CLIP_SAMPLES) % TOTAL_CLIP_SAMPLES;
-        result[i] += ring.buffer[readIdx];
+      const volume = typeof volumes[uid] === 'number' ? volumes[uid] : 1.0;
+      if (volume <= 0) continue;
+
+      const buf = ring.buffer;
+      const frameCount = totalSamples / 2;
+      for (let frame = 0; frame < frameCount; frame++) {
+        const readIdxL = (endIndex - totalSamples + frame * 2 + TOTAL_BUFFER_SAMPLES) % TOTAL_BUFFER_SAMPLES;
+        const readIdxR = (readIdxL + 1) % TOTAL_BUFFER_SAMPLES;
+        // Discord's per-user decode duplicates mono into L/R — collapse back to
+        // one sample before repanning rather than trusting the duplicate.
+        const mono = (buf[readIdxL] + buf[readIdxR]) / 2 * volume;
+        result[frame * 2] += mono * gainL;
+        result[frame * 2 + 1] += mono * gainR;
       }
-      mixedCount++;
     }
 
+    normalizeInPlace(result);
+
     // Hard clamp / soft-limit to 16-bit integer range
-    const finalResult = new Int16Array(TOTAL_CLIP_SAMPLES);
-    for (let i = 0; i < TOTAL_CLIP_SAMPLES; i++) {
+    const finalResult = new Int16Array(totalSamples);
+    for (let i = 0; i < totalSamples; i++) {
         let val = result[i];
         if (val > 32767) val = 32767;
         else if (val < -32768) val = -32768;
@@ -461,6 +562,47 @@ class GuildManager {
     }
 
     return finalResult;
+  }
+
+  // --- Web-dashboard mic-in: relay a browser's microphone into the voice call ---
+  // Raw 48kHz stereo s16le PCM only — same StreamType.Raw path used for Piper's
+  // /talk TTS output, so no ffmpeg subprocess sits in the way (see comment on
+  // playRawPcmFromDisk below for why that matters on this host).
+  startWebMic(guildId) {
+    const state = this.getGuildState(guildId);
+    if (!state.currentConnection) return false;
+    if (state.webMicStream) return true;
+    try {
+      if (!state.currentPlayer) {
+        state.currentPlayer = createAudioPlayer({ behaviors: { noSubscriber: NoSubscriberBehavior.Play } });
+        try { state.currentConnection.subscribe(state.currentPlayer); } catch (_) {}
+      }
+      const passthrough = new PassThrough();
+      state.webMicStream = passthrough;
+      const resource = createAudioResource(passthrough, { inputType: StreamType.Raw });
+      state.currentPlayer.play(resource);
+      console.log(`[voice][${guildId}] web mic input started`);
+      return true;
+    } catch (e) {
+      console.warn(`[voice][${guildId}] web mic start error: ${e?.message}`);
+      state.webMicStream = null;
+      return false;
+    }
+  }
+
+  pushWebMicAudio(guildId, pcmBuffer) {
+    const state = this.getGuildState(guildId);
+    if (!state.webMicStream && !this.startWebMic(guildId)) return;
+    try { state.webMicStream.write(pcmBuffer); } catch (e) { console.warn(`[voice][${guildId}] web mic write error: ${e?.message}`); }
+  }
+
+  stopWebMic(guildId) {
+    const state = this.getGuildState(guildId);
+    if (state.webMicStream) {
+      try { state.webMicStream.end(); } catch (_) {}
+      state.webMicStream = null;
+      console.log(`[voice][${guildId}] web mic input stopped`);
+    }
   }
 
   addUserClip(userId, title, url, guildId) {
@@ -593,7 +735,7 @@ class GuildManager {
     }
   }
 
-  async handleVoiceClipCommand(guildId, requestedByName, requestedById, titleOptional, targetUserId, triggerChannelId) {
+  async handleVoiceClipCommand(guildId, requestedByName, requestedById, titleOptional, targetUserId, triggerChannelId, clipSeconds) {
       try {
           const state = this.getGuildState(guildId);
           const guild = this.client.guilds.cache.get(guildId);
@@ -601,8 +743,9 @@ class GuildManager {
           const voiceChan = guild.channels.cache.get(state.currentChannelId);
           if (!voiceChan) return;
 
+          const seconds = Math.max(MIN_CLIP_SECONDS, Math.min(BUFFER_SECONDS, Number(clipSeconds) || DEFAULT_CLIP_SECONDS));
           const now = Date.now();
-          const cutoff = CLIP_SECONDS * 1000;
+          const cutoff = seconds * 1000;
           const botId = this.client.user?.id;
           const gcfg = config.guilds[guild.id] || {};
           const includeBots = !!gcfg.clipBots;
@@ -616,7 +759,7 @@ class GuildManager {
 
           if (memberIds.length === 0) return;
 
-          const mixed = this.getLast30sMix(guildId, memberIds);
+          const mixed = this.getMixedClip(guildId, memberIds, seconds);
 
           const clipsDir = path.join(__dirname, '..', 'public', 'clips');
           if (!fs.existsSync(clipsDir)) fs.mkdirSync(clipsDir, { recursive: true });
@@ -657,7 +800,7 @@ class GuildManager {
                           if (destChan && typeof destChan.send === 'function') {
                               const titleLine = titleOptional ? ` - ${titleOptional}` : '';
                               const msg = await destChan.send({
-                                  content: `🎬 **${requestedByName}** clipped the last 30s!${titleLine}`,
+                                  content: `🎬 **${requestedByName}** clipped the last ${seconds}s!${titleLine}`,
                                   files: [filepath]
                               });
                               if (msg.attachments.size > 0) postedUrl = msg.attachments.first().url;
@@ -668,7 +811,9 @@ class GuildManager {
 
               if (postedUrl) {
                   this.addUserClip(actualTargetUserId, titleOptional, postedUrl, guildId);
-                  this.webUI.emitToAll('clip_posted', { guildId, url: postedUrl, filename, requestedBy: requestedByName, title: titleOptional });
+                  const clipRecord = { url: postedUrl, filename, requestedBy: requestedByName, title: titleOptional, seconds, timestamp: Date.now() };
+                  this.addGuildClip(guildId, clipRecord);
+                  this.webUI.emitToAll('clip_posted', { guildId, ...clipRecord });
               }
 
               if (!KEEP_UPLOADS && fs.existsSync(filepath)) {

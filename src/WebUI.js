@@ -49,6 +49,26 @@ class WebUI {
       socket.on('remove_user_clip', (payload) => {
         if (this.onRemoveClip) this.onRemoveClip(payload, socket);
       });
+
+      socket.on('set_user_volume', (payload) => {
+        if (this.onSetUserVolume) this.onSetUserVolume(payload, socket);
+      });
+
+      socket.on('mic_start', (payload) => {
+        if (this.onMicStart) this.onMicStart(payload, socket);
+      });
+
+      socket.on('mic_audio', (payload) => {
+        if (this.onMicAudio) this.onMicAudio(payload, socket);
+      });
+
+      socket.on('mic_stop', (payload) => {
+        if (this.onMicStop) this.onMicStop(payload, socket);
+      });
+
+      // Lets index.js push a new connection's initial state (clip history,
+      // saved per-user volumes) without WebUI needing to know what those are.
+      if (this.onClientConnected) this.onClientConnected(socket);
     });
   }
 
