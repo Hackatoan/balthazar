@@ -107,9 +107,22 @@ function getGuildContainer(guildId) {
         let seconds = parseInt(secInput, 10);
         if (!seconds || seconds <= 0) seconds = 30;
         if (seconds > 120) seconds = 120;
+        const name = prompt('Optional filename for this clip? (blank = auto-generated)') || '';
         const title = prompt('Optional title for this clip? (Leave blank for default)') || '';
-        socket.emit('clip_request', { title, guildId, seconds });
-        showToast(`Clipping last ${seconds}s...`);
+
+        // If a specific member row is selected (instead of "all"), offer to
+        // isolate just their audio rather than mixing everyone talking.
+        let onlyUserId = null;
+        if (g.playMode !== 'all') {
+          const memberEl = g.membersEl.querySelector(`.member[data-userid="${g.playMode}"]`);
+          const uname = memberEl ? memberEl.querySelector('span')?.textContent : 'the selected user';
+          if (confirm(`Only include ${uname}'s audio? (Cancel = everyone currently talking)`)) {
+            onlyUserId = g.playMode;
+          }
+        }
+
+        socket.emit('clip_request', { title, guildId, seconds, name, onlyUserId });
+        showToast(`Clipping last ${seconds}s${onlyUserId ? ' (solo)' : ''}...`);
       } catch (_) {}
     });
   }

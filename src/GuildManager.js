@@ -68,6 +68,18 @@ function extractPcmFromWav(buffer) {
   return null;
 }
 
+// Turns a user-supplied clip name into a safe filename fragment — lowercased,
+// unsafe/whitespace characters collapsed to dashes, no path separators or
+// leading/trailing dashes, length-capped. Empty/unusable input just falls back
+// to the default "clip-<timestamp>" naming at the call site.
+function sanitizeClipName(raw) {
+  if (!raw) return '';
+  let s = String(raw).trim().toLowerCase();
+  s = s.replace(/[^a-z0-9_-]+/g, '-');
+  s = s.replace(/^-+|-+$/g, '');
+  return s.slice(0, 60);
+}
+
 // Discord's speaking.on('start') fires on ANY detected audio from a user's mic —
 // brief blips, background noise, someone else's own aside to a different person —
 // not just meaningful sustained speech. Barge-in used to act on it immediately and
@@ -825,7 +837,7 @@ class GuildManager {
     }
   }
 
-  async handleVoiceClipCommand(guildId, requestedByName, requestedById, titleOptional, targetUserId, triggerChannelId, clipSeconds) {
+  async handleVoiceClipCommand(guildId, requestedByName, requestedById, titleOptional, targetUserId, triggerChannelId, clipSeconds, nameOptional, onlyThem) {
       try {
           const state = this.getGuildState(guildId);
           const guild = this.client.guilds.cache.get(guildId);
@@ -841,11 +853,17 @@ class GuildManager {
           const includeBots = !!gcfg.clipBots;
           const windowStart = now - cutoff;
 
-          const memberIds = Array.from(state.userRings.entries())
+          let memberIds = Array.from(state.userRings.entries())
             .filter(([uid, ring]) => ring && ring.lastWriteTimeMs > windowStart)
             .filter(([uid]) => uid !== botId)
             .filter(([uid]) => includeBots || !(guild.members.cache.get(uid)?.user?.bot))
             .map(([uid]) => uid);
+
+          // "Only their audio" — isolate one speaker instead of mixing everyone
+          // currently talking. Falls back to the requester's own audio if no
+          // explicit @user was given (a sensible "just clip me" default).
+          const soloUserId = onlyThem ? (targetUserId || requestedById) : null;
+          if (soloUserId) memberIds = memberIds.filter((uid) => uid === soloUserId);
 
           if (memberIds.length === 0) return;
 
@@ -853,7 +871,8 @@ class GuildManager {
 
           const clipsDir = path.join(__dirname, '..', 'public', 'clips');
           if (!fs.existsSync(clipsDir)) fs.mkdirSync(clipsDir, { recursive: true });
-          const filename = `clip-${Date.now()}.wav`;
+          const cleanName = sanitizeClipName(nameOptional);
+          const filename = cleanName ? `${cleanName}-${Date.now()}.wav` : `clip-${Date.now()}.wav`;
           const filepath = path.join(clipsDir, filename);
 
           const writer = new wav.FileWriter(filepath, { channels: 2, sampleRate: 48000, bitDepth: 16 });
@@ -864,6 +883,8 @@ class GuildManager {
           writer.on('done', async () => {
               const fileUrl = `${process.env.CLIPS_BASE_URL || 'http://localhost:3000'}/clips/${filename}`;
               const titleText = titleOptional ? ` - ${titleOptional}` : '';
+              const soloName = soloUserId ? (guild.members.cache.get(soloUserId)?.user?.username || 'them') : null;
+              const soloNote = soloName ? ` (${soloName} only)` : '';
 
               let postedUrl = '';
 
@@ -876,7 +897,7 @@ class GuildManager {
                       const user = await this.client.users.fetch(actualTargetUserId);
                       if (user) {
                           const msg = await user.send({
-                              content: `🎥 Voice Clip requested by **${requestedByName}**${titleText}`,
+                              content: `🎥 Voice Clip requested by **${requestedByName}**${soloNote}${titleText}`,
                               files: [filepath]
                           });
                           if (msg.attachments.size > 0) postedUrl = msg.attachments.first().url;
@@ -890,7 +911,7 @@ class GuildManager {
                           if (destChan && typeof destChan.send === 'function') {
                               const titleLine = titleOptional ? ` - ${titleOptional}` : '';
                               const msg = await destChan.send({
-                                  content: `🎬 **${requestedByName}** clipped the last ${seconds}s!${titleLine}`,
+                                  content: `🎬 **${requestedByName}** clipped the last ${seconds}s${soloNote}!${titleLine}`,
                                   files: [filepath]
                               });
                               if (msg.attachments.size > 0) postedUrl = msg.attachments.first().url;

@@ -50,6 +50,8 @@ const clipCommand = new SlashCommandBuilder()
     o.setName('seconds').setDescription('How many seconds back to grab (default 30, up to 120)').setMinValue(5).setMaxValue(120).setRequired(false))
   .addStringOption((o) => o.setName('title').setDescription('Optional title for the clip').setRequired(false))
   .addUserOption((o) => o.setName('user').setDescription('Deliver to this user instead of the clip channel').setRequired(false))
+  .addStringOption((o) => o.setName('name').setDescription('Filename for the saved clip (optional)').setRequired(false))
+  .addBooleanOption((o) => o.setName('only').setDescription('Isolate just this user\'s audio instead of mixing everyone talking').setRequired(false))
   .toJSON();
 
 const sayCommand = new SlashCommandBuilder()
@@ -81,8 +83,8 @@ webUI.onSetClipChannel = (payload, socket) => {
 
 webUI.onClipRequest = (payload) => {
   if (!payload || !payload.guildId) return;
-  guildManager.handleVoiceClipCommand(payload.guildId, 'Web Panel', null, payload.title || '', null, null, payload.seconds);
-  console.log(`[web] clip requested for ${payload.guildId} (${payload.seconds || 30}s)`);
+  guildManager.handleVoiceClipCommand(payload.guildId, 'Web Panel', null, payload.title || '', payload.onlyUserId || null, null, payload.seconds, payload.name, !!payload.onlyUserId);
+  console.log(`[web] clip requested for ${payload.guildId} (${payload.seconds || 30}s)${payload.onlyUserId ? ' solo:' + payload.onlyUserId : ''}`);
 };
 
 webUI.onSetUserVolume = (payload) => {
@@ -220,9 +222,12 @@ client.on('interactionCreate', async (interaction) => {
       const seconds = interaction.options.getInteger('seconds');
       const title = interaction.options.getString('title') || '';
       const targetUser = interaction.options.getUser('user');
+      const name = interaction.options.getString('name') || '';
+      const only = !!interaction.options.getBoolean('only');
       const titleNote = title ? ` — ${title}` : '';
-      await interaction.reply(`🎬 Clipping the last ${seconds || 30}s${titleNote}...`);
-      guildManager.handleVoiceClipCommand(guildId, interaction.user.username, interaction.user.id, title, targetUser ? targetUser.id : null, interaction.channelId, seconds);
+      const onlyNote = only ? ` (${targetUser ? targetUser.username : interaction.user.username} only)` : '';
+      await interaction.reply(`🎬 Clipping the last ${seconds || 30}s${onlyNote}${titleNote}...`);
+      guildManager.handleVoiceClipCommand(guildId, interaction.user.username, interaction.user.id, title, targetUser ? targetUser.id : null, interaction.channelId, seconds, name, only);
       return;
     }
     if (interaction.commandName === 'say') {

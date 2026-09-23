@@ -22,7 +22,7 @@ class CommandManager {
         const helpText = [
           '**Commands**',
           '- -help | -commands: Show this help',
-          '- -clip [seconds] [title] or -clip @user [seconds] [title]: Create a clip of recent voice (default 30s, up to 120s of buffered history). Example: -clip 90 crazy moment. Clips are delivered as Discord attachments (DM or configured clip channel).',
+          '- -clip [seconds] [name:filename] [only|solo] [title] or -clip @user [seconds] [name:filename] [only|solo] [title]: Create a clip of recent voice (default 30s, up to 120s of buffered history). "name:x" sets the saved filename; "only"/"solo" isolates the @mentioned (or your own) audio instead of mixing everyone. Example: -clip @sarah 90 name:sarah-story solo her intro story. Clips are delivered as Discord attachments (DM or configured clip channel).',
           '- -clipfolder @user: List saved Discord-hosted clip links for the specified user (most recent first).',
           '- -addlast @user: Add the most recent clip to the mentioned user (registers Discord-hosted URL)',
           '- -beep: Play a short test beep in the current voice channel (diagnostics)',
@@ -36,7 +36,7 @@ class CommandManager {
           '- -clipbots: Server owner only, toggle including bot audio in clips (default OFF)',
           '- -say <message>: Balthazar speaks the message aloud in the current voice channel (text-to-speech)',
           '',
-          '- /clip [seconds] [title] [user]: Slash-command version of -clip.',
+          '- /clip [seconds] [title] [user] [name] [only]: Slash-command version of -clip.',
           '- /say <message>: Slash-command version of -say.',
           '',
           '**Conversation**',
@@ -194,8 +194,24 @@ class CommandManager {
           clipSeconds = Number(secMatch[1]);
           rest = rest.slice(1);
         }
+        // Flags can appear anywhere in the remaining args: name:<filename> sets
+        // the saved file's name, and a bare "only"/"solo" isolates the tagged
+        // (or, absent a mention, the requester's own) audio instead of mixing
+        // everyone currently talking.
+        let clipName = null;
+        const nameIdx = rest.findIndex((t) => /^name:/i.test(t));
+        if (nameIdx !== -1) {
+          clipName = rest[nameIdx].slice(5);
+          rest.splice(nameIdx, 1);
+        }
+        let onlyThem = false;
+        const onlyIdx = rest.findIndex((t) => /^(only|solo)$/i.test(t));
+        if (onlyIdx !== -1) {
+          onlyThem = true;
+          rest.splice(onlyIdx, 1);
+        }
         const title = rest.join(' ').trim();
-        this.guildManager.handleVoiceClipCommand(message.guild.id, message.author.username, message.author.id, title, targetUserId, message.channel.id, clipSeconds);
+        this.guildManager.handleVoiceClipCommand(message.guild.id, message.author.username, message.author.id, title, targetUserId, message.channel.id, clipSeconds, clipName, onlyThem);
         try { await message.react('🎬'); } catch (_) {}
         return;
       }
