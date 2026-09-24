@@ -18,6 +18,22 @@ const CONFIG_FILE = path.join(__dirname, '..', 'clips-config.json');
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
+// Saves below run on the same event loop as live voice-packet handling and
+// real-time transcription, so a blocking writeFileSync here can stall audio
+// processing mid-stream. fs.promises keeps the write off the main thread;
+// writes to the same file are chained through a per-file queue so overlapping
+// saves still land in order instead of racing each other on disk.
+const writeQueues = new Map();
+function writeJsonAsync(filePath, data, onError) {
+  const prev = writeQueues.get(filePath) || Promise.resolve();
+  const next = prev
+    .catch(() => {})
+    .then(() => fs.promises.writeFile(filePath, JSON.stringify(data, null, 2)))
+    .catch((e) => { if (onError) onError(e); });
+  writeQueues.set(filePath, next);
+  return next;
+}
+
 let config = { rooms: {}, dmPrefs: {} };
 function loadConfig() {
   try {
@@ -27,8 +43,7 @@ function loadConfig() {
   if (!config.dmPrefs) config.dmPrefs = {};
 }
 function saveConfig() {
-  try { fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2)); }
-  catch (e) { console.error('[config] save error:', e); }
+  writeJsonAsync(CONFIG_FILE, config, (e) => console.error('[config] save error:', e));
 }
 loadConfig();
 
@@ -39,8 +54,7 @@ function loadUserClips() {
   catch (e) {}
 }
 function saveUserClips() {
-  try { fs.writeFileSync(USER_CLIPS_FILE, JSON.stringify(userClips, null, 2)); }
-  catch (e) {}
+  writeJsonAsync(USER_CLIPS_FILE, userClips);
 }
 loadUserClips();
 
