@@ -111,6 +111,24 @@ const DATA_DIR = path.join(__dirname, '..', 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 const CONFIG_FILE = path.join(__dirname, '..', 'clips-config.json');
 
+// Saves below run on the same event loop as live voice-packet handling and
+// real-time transcription, so a blocking writeFileSync here (JSON payloads
+// that only grow, e.g. up to 200 guild clips) can stall audio processing
+// mid-stream. fs.promises keeps the write off the main thread; writes to the
+// same file are chained through a per-file queue so overlapping saves (e.g.
+// several config changes in quick succession) still land in order instead of
+// racing each other on disk.
+const writeQueues = new Map();
+function writeJsonAsync(filePath, data, label) {
+  const prev = writeQueues.get(filePath) || Promise.resolve();
+  const next = prev
+    .catch(() => {})
+    .then(() => fs.promises.writeFile(filePath, JSON.stringify(data, null, 2)))
+    .catch((e) => console.error(`[${label}] save error:`, e));
+  writeQueues.set(filePath, next);
+  return next;
+}
+
 let config = { guilds: {}, dmPrefs: {} };
 function loadConfig() {
   try {
@@ -122,10 +140,7 @@ function loadConfig() {
   if (!config.guilds) config.guilds = {};
   if (!config.dmPrefs) config.dmPrefs = {};
 }
-function saveConfig() {
-  try { fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2)); }
-  catch (e) { console.error('[config] save error:', e); }
-}
+function saveConfig() { writeJsonAsync(CONFIG_FILE, config, 'config'); }
 loadConfig();
 
 const USER_CLIPS_FILE = path.join(DATA_DIR, 'user-clips.json');
@@ -137,10 +152,7 @@ function loadUserClips() {
     }
   } catch (e) { console.error('[clips] load error:', e); }
 }
-function saveUserClips() {
-  try { fs.writeFileSync(USER_CLIPS_FILE, JSON.stringify(userClips, null, 2)); }
-  catch (e) { console.error('[clips] save error:', e); }
-}
+function saveUserClips() { writeJsonAsync(USER_CLIPS_FILE, userClips, 'clips'); }
 loadUserClips();
 
 // Per-guild feed of every posted clip, so the dashboard can show clip history
@@ -155,10 +167,7 @@ function loadGuildClips() {
     }
   } catch (e) { console.error('[clips] guild-clips load error:', e); }
 }
-function saveGuildClips() {
-  try { fs.writeFileSync(GUILD_CLIPS_FILE, JSON.stringify(guildClips, null, 2)); }
-  catch (e) { console.error('[clips] guild-clips save error:', e); }
-}
+function saveGuildClips() { writeJsonAsync(GUILD_CLIPS_FILE, guildClips, 'clips-guild'); }
 loadGuildClips();
 
 class GuildManager {
