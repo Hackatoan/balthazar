@@ -285,6 +285,8 @@ let toastEl;
 function ensureToast() {
   if (toastEl) return toastEl;
   toastEl = document.createElement('div');
+  toastEl.setAttribute('role', 'status');
+  toastEl.setAttribute('aria-live', 'polite');
   toastEl.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#111;color:#fff;padding:8px 14px;border-radius:8px;opacity:0;transition:opacity .2s;z-index:2000;border:1px solid #333';
   document.body.appendChild(toastEl);
   return toastEl;
@@ -406,7 +408,8 @@ socket.on('update', data => {
     div.className = 'member';
     div.dataset.userid = m.id;
     const vol = userVolumes[m.id] != null ? userVolumes[m.id] : 1;
-    div.innerHTML = `<img src="${m.avatar}" alt="avatar" style="width:32px;height:32px;border-radius:50%;margin-right:8px;">`+
+    const safeUsername = String(m.username || 'Unknown').replace(/"/g, '&quot;');
+    div.innerHTML = `<img src="${m.avatar}" alt="${safeUsername}'s avatar" style="width:32px;height:32px;border-radius:50%;margin-right:8px;">`+
       `<span style="margin-right:6px;">${m.username}</span>`+
       `<input type="range" class="vol-slider" min="0" max="200" value="${Math.round(vol * 100)}" data-userid="${m.id}" data-guild="${guildId}" title="Volume (${Math.round(vol * 100)}%)" style="width:70px;">`;
     g.membersEl.appendChild(div);
