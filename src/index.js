@@ -153,9 +153,17 @@ webUI.onPlayUpload = (payload, socket) => {
     const upDir = path.join(__dirname, '..', 'public', 'uploads');
     if (!fs.existsSync(upDir)) fs.mkdirSync(upDir, { recursive: true });
 
-    const ext = (payload.name && payload.name.includes('.')) ? payload.name.split('.').pop() : 'bin';
+    // Strip anything but alphanumerics from the client-supplied extension so a
+    // crafted name (e.g. "a.b/../../evil") can't inject path separators into
+    // the generated filename and write outside the uploads directory.
+    const rawExt = (payload.name && payload.name.includes('.')) ? payload.name.split('.').pop() : 'bin';
+    const ext = (String(rawExt).replace(/[^a-zA-Z0-9]/g, '').slice(0, 10)) || 'bin';
     const filename = `upload-${Date.now()}.${ext}`;
     const filepath = path.join(upDir, filename);
+    if (!filepath.startsWith(upDir + path.sep)) {
+      socket.emit('play_error', 'Invalid file name');
+      return;
+    }
 
     // Write array buffer to file
     const buf = Buffer.from(payload.data);

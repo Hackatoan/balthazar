@@ -62,9 +62,14 @@ class CommandManager {
       }
 
       if (content.startsWith('-playserver ')) {
-        const filename = rawContent.substring(12).trim();
-        const p = path.join(__dirname, '..', 'public', 'uploads', filename);
-        if (fs.existsSync(p)) {
+        const rawFilename = rawContent.substring(12).trim();
+        // path.basename strips any directory components (including "../"), so a
+        // guild member can't walk this out of the uploads folder to read/play
+        // arbitrary files elsewhere on disk (e.g. "-playserver ../../.env").
+        const filename = path.basename(rawFilename);
+        const upDir = path.join(__dirname, '..', 'public', 'uploads');
+        const p = path.join(upDir, filename);
+        if (filename && p.startsWith(upDir + path.sep) && fs.existsSync(p)) {
           this.guildManager.playFileFromDisk(message.guild.id, p);
           try { await message.reply('Playing ' + filename); } catch (_) {}
         } else {
