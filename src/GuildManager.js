@@ -846,13 +846,32 @@ class GuildManager {
     }
   }
 
+  // Reports a clip request that produced nothing back to the channel that asked
+  // for it (when we have one) instead of leaving the requester guessing why no
+  // clip ever showed up. Purely command-feedback text; no audio-path involved.
+  _notifyClipFailure(guild, triggerChannelId, reason) {
+      if (!guild || !triggerChannelId) return;
+      try {
+          const chan = guild.channels.cache.get(triggerChannelId);
+          if (chan && typeof chan.send === 'function') {
+              chan.send(`⚠️ Couldn't make that clip — ${reason}`).catch(() => {});
+          }
+      } catch (_) {}
+  }
+
   async handleVoiceClipCommand(guildId, requestedByName, requestedById, titleOptional, targetUserId, triggerChannelId, clipSeconds, nameOptional, onlyThem) {
       try {
           const state = this.getGuildState(guildId);
           const guild = this.client.guilds.cache.get(guildId);
-          if (!guild || !state.currentChannelId) return;
+          if (!guild || !state.currentChannelId) {
+              this._notifyClipFailure(guild, triggerChannelId, 'not currently in a voice channel.');
+              return;
+          }
           const voiceChan = guild.channels.cache.get(state.currentChannelId);
-          if (!voiceChan) return;
+          if (!voiceChan) {
+              this._notifyClipFailure(guild, triggerChannelId, 'the voice channel is no longer available.');
+              return;
+          }
 
           const seconds = Math.max(MIN_CLIP_SECONDS, Math.min(BUFFER_SECONDS, Number(clipSeconds) || DEFAULT_CLIP_SECONDS));
           const now = Date.now();
@@ -874,7 +893,13 @@ class GuildManager {
           const soloUserId = onlyThem ? (targetUserId || requestedById) : null;
           if (soloUserId) memberIds = memberIds.filter((uid) => uid === soloUserId);
 
-          if (memberIds.length === 0) return;
+          if (memberIds.length === 0) {
+              const who = soloUserId ? (guild.members.cache.get(soloUserId)?.user?.username || 'that user') : null;
+              this._notifyClipFailure(guild, triggerChannelId, who
+                  ? `no recent audio from ${who} in the last ${seconds}s.`
+                  : `no recent audio in the last ${seconds}s.`);
+              return;
+          }
 
           const mixed = this.getMixedClip(guildId, memberIds, seconds);
 
