@@ -187,9 +187,10 @@ webUI.onPlayUpload = (payload, socket) => {
 client.on('ready', async () => {
   console.log(`[discord] Logged in as ${client.user.tag}`);
   console.log(`[talk] mode ${talkManager.configured ? 'configured' : 'DISABLED (no GEMINI_API_KEY)'}`);
-  for (const guild of client.guilds.cache.values()) {
-    await registerTalkCommand(guild);
-  }
+  // registerTalkCommand already catches its own errors per-guild, so firing
+  // these concurrently (instead of one awaited API round-trip at a time) is
+  // safe and cuts ready-time startup latency on multi-guild deployments.
+  await Promise.all(Array.from(client.guilds.cache.values()).map(registerTalkCommand));
   console.log(`[slash] /talk registered in ${client.guilds.cache.size} guild(s)`);
 });
 
