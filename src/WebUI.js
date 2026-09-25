@@ -4,6 +4,10 @@ const { Server } = require('socket.io');
 const path = require('path');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
+// Optional shared secret gating the control-plane socket (clip requests, "say"
+// TTS, mic injection into the live voice channel, and file uploads). Without
+// it, anyone who can reach this port can drive those actions anonymously.
+const WEB_UI_TOKEN = process.env.WEB_UI_TOKEN || '';
 
 class WebUI {
   constructor() {
@@ -23,6 +27,17 @@ class WebUI {
   }
 
   setupSocketIO() {
+    if (WEB_UI_TOKEN) {
+      this.io.use((socket, next) => {
+        const provided = (socket.handshake.auth && socket.handshake.auth.token)
+          || socket.handshake.query.token;
+        if (provided === WEB_UI_TOKEN) return next();
+        next(new Error('unauthorized'));
+      });
+    } else {
+      console.warn('[web] WEB_UI_TOKEN is not set — the control panel (clip requests, "say" TTS, mic injection into the live voice channel, uploads) accepts commands from anyone who can reach this port, with no login. Set WEB_UI_TOKEN in .env to require a shared secret; visit the panel once with ?token=<value> and the browser remembers it.');
+    }
+
     this.io.on('connection', (socket) => {
       console.log('[web] client connected');
 

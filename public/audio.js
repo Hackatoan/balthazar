@@ -1,4 +1,13 @@
-const socket = io();
+// If the server requires WEB_UI_TOKEN, pick it up from ?token=... once and
+// remember it in localStorage so the panel keeps working on reload without
+// the token sitting in the address bar every time.
+const urlToken = new URLSearchParams(window.location.search).get('token');
+if (urlToken) {
+  try { localStorage.setItem('balthazar_token', urlToken); } catch (_) {}
+}
+let savedToken = '';
+try { savedToken = localStorage.getItem('balthazar_token') || ''; } catch (_) {}
+const socket = io({ auth: { token: urlToken || savedToken } });
 
 // Connection lifecycle handling
 socket.on('connect_error', () => {
