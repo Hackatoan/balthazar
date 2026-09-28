@@ -165,19 +165,27 @@ webUI.onPlayUpload = (payload, socket) => {
       return;
     }
 
-    // Write array buffer to file
+    // Write array buffer to file. This runs on the same event loop as live
+    // voice-packet handling and real-time transcription (see the writeJsonAsync
+    // comments in GuildManager.js/RoomManager.js for the same reasoning) — a
+    // blocking writeFileSync here can stall in-progress audio for however long
+    // the upload takes to hit disk. fs.promises keeps it off the main thread;
+    // playback/response only proceed once the write actually lands.
     const buf = Buffer.from(payload.data);
-    fs.writeFileSync(filepath, buf);
+    fs.promises.writeFile(filepath, buf).then(() => {
+      const url = `/uploads/${filename}`;
+      socket.emit('play_saved', { url, name: payload.name || filename });
 
-    const url = `/uploads/${filename}`;
-    socket.emit('play_saved', { url, name: payload.name || filename });
-
-    socket.emit('play_started');
-    guildManager.playFileFromDisk(payload.guildId, filepath,
-      () => { console.log(`[web] playing file ${filename} in guild ${payload.guildId}`); },
-      () => { socket.emit('play_ended'); },
-      (err) => { socket.emit('play_error', err.message); }
-    );
+      socket.emit('play_started');
+      guildManager.playFileFromDisk(payload.guildId, filepath,
+        () => { console.log(`[web] playing file ${filename} in guild ${payload.guildId}`); },
+        () => { socket.emit('play_ended'); },
+        (err) => { socket.emit('play_error', err.message); }
+      );
+    }).catch((e) => {
+      console.error('Error handling upload:', e);
+      socket.emit('play_error', 'Upload handling failed');
+    });
   } catch (e) {
     console.error('Error handling upload:', e);
     socket.emit('play_error', 'Upload handling failed');
