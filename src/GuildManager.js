@@ -18,6 +18,27 @@ const CLIP_CHANNELS = 2;
 const MIN_STABLE_MS = 3000;
 const TOTAL_BUFFER_SAMPLES = CLIP_SAMPLE_RATE * CLIP_CHANNELS * BUFFER_SECONDS;
 
+// playClipIntoChannel() is meant to fetch only clips we ourselves posted:
+// Discord's CDN, or our own self-hosted /clips/ URL (CLIPS_BASE_URL). The web
+// panel's "Play in channel" / assign-clip flow passes a client-supplied URL
+// straight to axios.get with no restriction, which lets an authenticated
+// panel user make the bot issue a server-side request to any host/port it can
+// reach (e.g. other LAN services, or link-local cloud metadata) — classic
+// SSRF. This allowlist keeps the fetch scoped to what the feature actually
+// needs: Discord's CDN or our own clips host.
+const ALLOWED_CLIP_HOSTS = new Set(['cdn.discordapp.com', 'media.discordapp.net']);
+function isAllowedClipUrl(url) {
+  let parsed;
+  try { parsed = new URL(url); } catch (_) { return false; }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+  if (ALLOWED_CLIP_HOSTS.has(parsed.hostname)) return true;
+  try {
+    const ownHost = new URL(process.env.CLIPS_BASE_URL || 'http://localhost:3000').hostname;
+    if (parsed.hostname === ownHost) return true;
+  } catch (_) { /* fall through */ }
+  return false;
+}
+
 // Target peak for clip normalization (~-1dBFS, leaves a little headroom) and the
 // most we'll ever boost a quiet clip to reach it — capped so dead air / mic
 // noise floor doesn't get amplified into audible hiss.
@@ -825,6 +846,9 @@ class GuildManager {
   // locally in the browser's <audio> tag.
   async playClipIntoChannel(guildId, url, onStart, onEnd, onError) {
     try {
+      if (!isAllowedClipUrl(url)) {
+        throw new Error('Refusing to fetch clip from disallowed host');
+      }
       const res = await axios.get(url, { responseType: 'arraybuffer', timeout: 20000 });
       const pcm = extractPcmFromWav(Buffer.from(res.data));
       if (!pcm) throw new Error('Could not read clip audio (not a recognized WAV)');
