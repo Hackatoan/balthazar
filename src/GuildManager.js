@@ -127,6 +127,17 @@ const BARGE_IN_MIN_RMS = Number(process.env.TALK_BARGE_IN_MIN_RMS || 300);
 
 const KEEP_UPLOADS = process.env.KEEP_UPLOADS === '1';
 
+// Discord rejects large uploads (HTTP 413); a 120s stereo WAV is ~23MB.
+// Transcode to MP3 for delivery, falling back to the WAV if ffmpeg fails.
+function wavToMp3(wavPath) {
+  return new Promise((resolve) => {
+    const mp3Path = wavPath.replace(/\.wav$/i, '.mp3');
+    const ff = spawn('ffmpeg', ['-y', '-loglevel', 'error', '-i', wavPath, '-codec:a', 'libmp3lame', '-b:a', '128k', mp3Path]);
+    ff.on('error', () => resolve(null));
+    ff.on('close', (code) => resolve(code === 0 && fs.existsSync(mp3Path) ? mp3Path : null));
+  });
+}
+
 // Shared config loading
 const DATA_DIR = path.join(__dirname, '..', 'data');
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -939,6 +950,8 @@ class GuildManager {
           writer.end();
 
           writer.on('done', async () => {
+              const mp3Path = await wavToMp3(filepath);
+              const sendPath = mp3Path || filepath;
               const fileUrl = `${process.env.CLIPS_BASE_URL || 'http://localhost:3000'}/clips/${filename}`;
               const titleText = titleOptional ? ` - ${titleOptional}` : '';
               const soloName = soloUserId ? (guild.members.cache.get(soloUserId)?.user?.username || 'them') : null;
@@ -956,7 +969,7 @@ class GuildManager {
                       if (user) {
                           const msg = await user.send({
                               content: `🎥 Voice Clip requested by **${requestedByName}**${soloNote}${titleText}`,
-                              files: [filepath]
+                              files: [sendPath]
                           });
                           if (msg.attachments.size > 0) postedUrl = msg.attachments.first().url;
                       }
@@ -970,7 +983,7 @@ class GuildManager {
                               const titleLine = titleOptional ? ` - ${titleOptional}` : '';
                               const msg = await destChan.send({
                                   content: `🎬 **${requestedByName}** clipped the last ${seconds}s${soloNote}!${titleLine}`,
-                                  files: [filepath]
+                                  files: [sendPath]
                               });
                               if (msg.attachments.size > 0) postedUrl = msg.attachments.first().url;
                           }
@@ -986,7 +999,7 @@ class GuildManager {
               }
 
               if (!KEEP_UPLOADS && fs.existsSync(filepath)) {
-                  setTimeout(() => { try { fs.unlinkSync(filepath); } catch (_) {} }, 5000);
+                  setTimeout(() => { for (const f of [filepath, mp3Path]) { try { if (f) fs.unlinkSync(f); } catch (_) {} } }, 5000);
               }
           });
       } catch (e) {
