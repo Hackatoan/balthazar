@@ -394,6 +394,21 @@ class GuildManager {
       state.currentConnection.on('error', (err) => {
         console.warn(`[voice][${guildId}] connection error: ${err?.message || err}`);
       });
+      // Recover from drops. Without this a 'disconnected' connection sat forever with
+      // state.currentChannelId still set, so the periodic scan (which only joins when
+      // currentChannelId is null) never rejoined and the bot stayed out of calls.
+      const conn = state.currentConnection;
+      conn.on(VoiceConnectionStatus.Disconnected, async () => {
+        try {
+          // Discord moved us / voice server changed: it will start reconnecting on its own.
+          await Promise.race([
+            entersState(conn, VoiceConnectionStatus.Signalling, 5000),
+            entersState(conn, VoiceConnectionStatus.Connecting, 5000),
+          ]);
+        } catch (_) {
+          if (state.currentConnection === conn) this.leaveVoiceChannel(guildId, 'voice-disconnected');
+        }
+      });
     } catch (_) {}
 
     if (!state.currentPlayer) {
@@ -412,7 +427,13 @@ class GuildManager {
 
     entersState(state.currentConnection, VoiceConnectionStatus.Ready, 15000)
       .then(() => console.log(`[voice][${guildId}] connection Ready`))
-      .catch((e) => console.warn(`[voice][${guildId}] connection not ready: ${e?.message || e}`));
+      .catch((e) => {
+        console.warn(`[voice][${guildId}] connection not ready: ${e?.message || e}`);
+        // Never reached Ready: drop it so the periodic scan can retry cleanly.
+        if (state.currentConnection && state.currentConnection.state.status !== VoiceConnectionStatus.Ready) {
+          this.leaveVoiceChannel(guildId, 'not-ready');
+        }
+      });
 
     const receiver = state.currentConnection.receiver;
     receiver.speaking.on('start', (userId) => {
