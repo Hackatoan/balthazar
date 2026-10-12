@@ -219,11 +219,16 @@ function updateSelectionStyles(g) {
   const memberEls = g.membersEl.querySelectorAll('.member');
   if (playMode === 'all') {
     g.channelEl.style.textDecoration = 'underline';
-    memberEls.forEach(div => div.style.textDecoration = 'none');
+    memberEls.forEach(div => {
+      div.style.textDecoration = 'none';
+      div.setAttribute('aria-pressed', 'false');
+    });
   } else {
     g.channelEl.style.textDecoration = 'none';
     memberEls.forEach(div => {
-      div.style.textDecoration = (div.dataset.userid === playMode) ? 'underline' : 'none';
+      const isSelected = div.dataset.userid === playMode;
+      div.style.textDecoration = isSelected ? 'underline' : 'none';
+      div.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
     });
   }
 }
@@ -231,10 +236,17 @@ function updateSelectionStyles(g) {
 function setUserClickHandlers(g) {
   if (!g) return;
   g.membersEl.querySelectorAll('.member').forEach(div => {
-    div.onclick = () => {
+    const selectUser = () => {
       g.playMode = div.dataset.userid;
       updateSelectionStyles(g);
       resetJitter();
+    };
+    div.onclick = selectUser;
+    div.onkeydown = (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        selectUser();
+      }
     };
   });
 }
@@ -416,8 +428,12 @@ socket.on('update', data => {
     const div = document.createElement('div');
     div.className = 'member';
     div.dataset.userid = m.id;
+    div.role = 'button';
+    div.tabIndex = 0;
     const vol = userVolumes[m.id] != null ? userVolumes[m.id] : 1;
     const safeUsername = String(m.username || 'Unknown').replace(/"/g, '&quot;');
+    div.setAttribute('aria-label', `Select ${m.username} to listen to or control their audio`);
+    div.setAttribute('aria-pressed', g.playMode === m.id ? 'true' : 'false');
     div.innerHTML = `<img src="${m.avatar}" alt="${safeUsername}'s avatar" style="width:32px;height:32px;border-radius:50%;margin-right:8px;">`+
       `<span style="margin-right:6px;">${m.username}</span>`+
       `<input type="range" class="vol-slider" min="0" max="200" value="${Math.round(vol * 100)}" data-userid="${m.id}" data-guild="${guildId}" title="Volume (${Math.round(vol * 100)}%)" style="width:70px;">`;
