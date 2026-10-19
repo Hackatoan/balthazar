@@ -13,6 +13,7 @@ const axios = require('axios');
 const BUFFER_SECONDS = Number(process.env.CLIP_BUFFER_SECONDS || 120);
 const DEFAULT_CLIP_SECONDS = 30;
 const MIN_CLIP_SECONDS = 5;
+const REJOIN_DELAY_MS = 3000;
 const CLIP_SAMPLE_RATE = 48000;
 const CLIP_CHANNELS = 2;
 const MIN_STABLE_MS = 3000;
@@ -314,7 +315,7 @@ class GuildManager {
         }
       }
 
-      if (!state.currentChannelId && channel && channel.members && channel.members.size > 0) {
+      if (!state.currentChannelId && Date.now() >= (state.rejoinAfter || 0) && channel && channel.members && channel.members.size > 0) {
         const botId = this.client.user.id;
         const now2 = Date.now();
         const realMembers = Array.from(channel.members.values()).filter(m => m.id !== botId);
@@ -372,6 +373,20 @@ class GuildManager {
       }
     }
     const state = this.getGuildState(guild.id);
+    // Moved (by someone else) into a voice channel with nobody else in it: drop the
+    // connection and sit out a few seconds; checkEligibleChannels() then rejoins
+    // the most populated channel once the cooldown passes.
+    if (this.client.user && newState.id === this.client.user.id && newState.channelId
+        && state.currentChannelId && newState.channelId !== state.currentChannelId) {
+      const movedTo = newState.channel;
+      const others = movedTo ? movedTo.members.filter(m => m.id !== this.client.user.id).size : 0;
+      if (others === 0) {
+        console.log(`[voice][${guild.id}] moved into empty channel ${newState.channelId}; reconnecting shortly`);
+        state.rejoinAfter = Date.now() + REJOIN_DELAY_MS;
+        this.leaveVoiceChannel(guild.id, 'moved-to-empty');
+        return;
+      }
+    }
     if (!state.currentChannelId) return;
     const channel = guild.channels.cache.get(state.currentChannelId);
     if (channel) this.webUI.updateWebMembers(channel);
