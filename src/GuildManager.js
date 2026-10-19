@@ -361,6 +361,16 @@ class GuildManager {
 
   handleVoiceStateUpdate(oldState, newState) {
     const guild = newState.guild;
+    // Auto server-undeafen: if someone server-deafened the bot and it has Deafen Members, undo it.
+    if (this.client.user && newState.id === this.client.user.id && newState.channelId && newState.serverDeaf) {
+      const me = guild.members.me;
+      if (me && me.permissions.has('DeafenMembers')) {
+        newState.setDeaf(false, 'auto-undeafen').then(
+          () => console.log(`[voice][${guild.id}] auto server-undeafened`),
+          (e) => console.warn(`[voice][${guild.id}] auto-undeafen failed: ${e?.message || e}`)
+        );
+      }
+    }
     const state = this.getGuildState(guild.id);
     if (!state.currentChannelId) return;
     const channel = guild.channels.cache.get(state.currentChannelId);
