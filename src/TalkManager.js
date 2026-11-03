@@ -76,10 +76,10 @@ function normalizeToTargetRms(int16, targetRms = 0.1, maxGain = 6.0) {
   if (int16.length === 0) return int16;
   let sumSq = 0;
   for (let i = 0; i < int16.length; i++) {
-    const n = int16[i] / 32768.0;
+    const n = int16[i];
     sumSq += n * n;
   }
-  const rms = Math.sqrt(sumSq / int16.length);
+  const rms = Math.sqrt(sumSq / int16.length) / 32768.0;
   if (rms < 0.0001) return int16;
   let gain = targetRms / rms;
   if (gain > maxGain) gain = maxGain;
