@@ -111,6 +111,12 @@ class WebUI {
   }
 
   updateWebMembers(channel, guildId) {
+    // Called every 2s per guild from GuildManager.checkEligibleChannels() plus on
+    // every voice-state change. With no browser connected the payload (text
+    // channel list, member list, avatar URLs, config lookup) is built and then
+    // emitted to nobody — skip the work entirely. A browser that connects later
+    // gets a fresh snapshot on the next 2s tick.
+    if (!this.hasClients()) return;
     let textChannels = [];
     let clipChannelId = null;
     if (this.guildManager && channel) {
