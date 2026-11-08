@@ -278,10 +278,8 @@ function renderClips(guildId, items) {
      // We will just show all clips for the guild for simplicity unless we specifically implement user clip tracking per guild.
   }
 
-  if (list.length === 0) {
-      g.clipsEl.innerHTML = '<div style="color:#72767d;font-style:italic;">No clips yet.</div>';
-      return;
-  }
+  // Empty state comes from .guild-clips:empty::before in index.html.
+  if (list.length === 0) return;
 
   list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
 
