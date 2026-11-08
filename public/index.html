@@ -22,6 +22,7 @@
     <p id="connect-desc">Click the button below to allow the website to play audio from Discord.</p>
     <button id="connect-btn" autofocus style="font-size:1.2em;padding:0.7em 2em;border-radius:8px;background:#5865f2;color:#fff;border:none;cursor:pointer;">Connect</button>
   </div>
+  <main>
   <div id="guilds-container" inert style="filter:blur(2px);pointer-events:none;"></div>
 
   <template id="guild-template">
@@ -47,7 +48,7 @@
     </div>
   </template>
   <div id="play-container" class="container" inert style="max-width:600px;margin-top:12px;background:#25282c;">
-    <div style="font-size:1.2em;margin-bottom:8px;">Play audio into Discord</div>
+    <div role="heading" aria-level="2" style="font-size:1.2em;margin-bottom:8px;">Play audio into Discord</div>
     <div id="play-panel" style="display:flex;flex-direction:column;gap:10px;">
       <select id="guild-selector" aria-label="Server to play audio into" style="background:#2c2f33;color:#fff;border:1px solid #3a3f44;border-radius:6px;padding:8px;"><option value="">Select a Server</option></select>
       <input type="file" id="file-input" aria-label="Audio file to play (MP3 or WAV)" accept="audio/mp3,audio/mpeg,audio/wav" style="background:#2c2f33;color:#fff;border:1px solid #3a3f44;border-radius:6px;padding:8px;"/>
@@ -56,6 +57,7 @@
       <div id="play-status" role="status" aria-live="polite" style="opacity:0.8;font-size:0.95em;"></div>
     </div>
   </div>
+  </main>
   <script src="/socket.io/socket.io.js"></script>
   <script src="/audio.js"></script>
   <script>
