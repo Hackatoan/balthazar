@@ -217,10 +217,17 @@ function getGuildContainer(guildId) {
   }
 
   if (channelEl) {
-    channelEl.addEventListener('click', () => {
+    const selectAll = () => {
       g.playMode = 'all';
       updateSelectionStyles(g);
       resetJitter();
+    };
+    channelEl.addEventListener('click', selectAll);
+    channelEl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        selectAll();
+      }
     });
   }
 
@@ -233,12 +240,14 @@ function updateSelectionStyles(g) {
   const memberEls = g.membersEl.querySelectorAll('.member');
   if (playMode === 'all') {
     g.channelEl.style.textDecoration = 'underline';
+    g.channelEl.setAttribute('aria-pressed', 'true');
     memberEls.forEach(div => {
       div.style.textDecoration = 'none';
       div.setAttribute('aria-pressed', 'false');
     });
   } else {
     g.channelEl.style.textDecoration = 'none';
+    g.channelEl.setAttribute('aria-pressed', 'false');
     memberEls.forEach(div => {
       const isSelected = div.dataset.userid === playMode;
       div.style.textDecoration = isSelected ? 'underline' : 'none';
@@ -410,6 +419,7 @@ socket.on('update', data => {
   if (!g) return;
 
   g.channelEl.textContent = `Channel: ${data.channel.name}`;
+  g.channelEl.setAttribute('aria-label', `Channel: ${data.channel.name} (listen to everyone)`);
 
   // The server re-sends this snapshot every 2s per guild whether or not
   // anything changed. Only rebuild the clip-channel <select> and the member
