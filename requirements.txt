@@ -4,4 +4,4 @@ soundfile
 python-dotenv
 webrtcvad
 faster-whisper
-setuptools==69.5.1
+setuptools==84.1.0
