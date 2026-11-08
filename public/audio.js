@@ -683,6 +683,13 @@ function pcmFromPayload(data) {
 
 socket.on('audio', ({ userId, data }) => {
   if (data == null) return;
+  // Until the AudioContext is running (browsers keep it suspended until the
+  // Connect click / first gesture), onaudioprocess never fires, so nothing ever
+  // drains userBuffers. Every packet then re-allocated and copied the whole
+  // ever-growing backlog (O(n²) work, unbounded memory: ~11.5 MB/min per
+  // speaker) — and on Connect the mixer started minutes behind live. Drop
+  // packets until playback can actually consume them.
+  if (audioCtx.state !== 'running') return;
   const samples = pcmFromPayload(data);
   const existing = userBuffers[userId];
   if (existing && existing.length > 0) {
