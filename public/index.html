@@ -14,12 +14,12 @@
   </style>
 </head>
 <body>
-  <div id="connect-overlay" style="position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(30,30,30,0.98);z-index:1000;display:flex;align-items:center;justify-content:center;flex-direction:column;">
-    <h2>Connect to Audio</h2>
-    <p>Click the button below to allow the website to play audio from Discord.</p>
-    <button id="connect-btn" style="font-size:1.2em;padding:0.7em 2em;border-radius:8px;background:#5865f2;color:#fff;border:none;cursor:pointer;">Connect</button>
+  <div id="connect-overlay" role="dialog" aria-modal="true" aria-labelledby="connect-title" aria-describedby="connect-desc" style="position:fixed;top:0;left:0;width:100vw;height:100vh;background:rgba(30,30,30,0.98);z-index:1000;display:flex;align-items:center;justify-content:center;flex-direction:column;">
+    <h2 id="connect-title">Connect to Audio</h2>
+    <p id="connect-desc">Click the button below to allow the website to play audio from Discord.</p>
+    <button id="connect-btn" autofocus style="font-size:1.2em;padding:0.7em 2em;border-radius:8px;background:#5865f2;color:#fff;border:none;cursor:pointer;">Connect</button>
   </div>
-  <div id="guilds-container" style="filter:blur(2px);pointer-events:none;"></div>
+  <div id="guilds-container" inert style="filter:blur(2px);pointer-events:none;"></div>
 
   <template id="guild-template">
     <div class="container guild-container">
@@ -43,7 +43,7 @@
       <div class="guild-audio-streams"></div>
     </div>
   </template>
-  <div class="container" style="max-width:600px;margin-top:12px;background:#25282c;">
+  <div id="play-container" class="container" inert style="max-width:600px;margin-top:12px;background:#25282c;">
     <div style="font-size:1.2em;margin-bottom:8px;">Play audio into Discord</div>
     <div id="play-panel" style="display:flex;flex-direction:column;gap:10px;">
       <select id="guild-selector" aria-label="Server to play audio into" style="background:#2c2f33;color:#fff;border:1px solid #3a3f44;border-radius:6px;padding:8px;"><option value="">Select a Server</option></select>
@@ -60,6 +60,9 @@
       document.getElementById('connect-overlay').style.display = 'none';
       document.getElementById('guilds-container').style.filter = '';
       document.getElementById('guilds-container').style.pointerEvents = '';
+      // Controls behind the overlay are inert (not tabbable) until connected.
+      document.getElementById('guilds-container').removeAttribute('inert');
+      document.getElementById('play-container').removeAttribute('inert');
       // Resume audio context if needed
       if (window.audioCtx && window.audioCtx.state === 'suspended') {
         window.audioCtx.resume();
