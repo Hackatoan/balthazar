@@ -80,16 +80,21 @@ class CommandManager {
 
       if (content === '-playlast') {
         const upDir = path.join(__dirname, '..', 'public', 'uploads');
-        if (!fs.existsSync(upDir)) return;
-        const files = fs.readdirSync(upDir).filter(f => f.endsWith('.mp3') || f.endsWith('.wav'));
+        // Nothing ever prunes public/uploads, so this directory only grows. A
+        // sync readdir + one statSync per file blocked the event loop that also
+        // drives live voice receive/transcription for the whole scan; do it
+        // async and stat the files concurrently instead.
+        let entries;
+        try { entries = await fs.promises.readdir(upDir); } catch (_) { return; }
+        const files = entries.filter(f => f.endsWith('.mp3') || f.endsWith('.wav'));
         if (!files.length) {
           try { await message.reply('No files in uploads.'); } catch (_) {}
           return;
         }
-        const mapped = files.map(f => {
+        const mapped = await Promise.all(files.map(async f => {
           const p = path.join(upDir, f);
-          return { path: p, mtime: fs.statSync(p).mtimeMs };
-        });
+          return { path: p, mtime: (await fs.promises.stat(p)).mtimeMs };
+        }));
         mapped.sort((a, b) => b.mtime - a.mtime);
         this.guildManager.playFileFromDisk(message.guild.id, mapped[0].path);
         try { await message.reply('Playing last uploaded file.'); } catch (_) {}
