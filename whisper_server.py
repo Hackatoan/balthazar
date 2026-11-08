@@ -1,11 +1,9 @@
-import tempfile
 import os
 import threading
 import time
 import concurrent.futures
 from flask import Flask, request, jsonify
 import numpy as np
-import soundfile as sf
 import webrtcvad
 
 try:
@@ -73,7 +71,7 @@ def contains_speech(audio_data, sample_rate=16000):
     # If at least 20% of frames contain speech, consider it valid speech
     return (speech_frames / len(frames)) > 0.2
 
-def process_job(tmp_name, enqueue_time):
+def process_job(audio, enqueue_time):
     dequeue_time = time.time()
     queue_wait_ms = (dequeue_time - enqueue_time) * 1000
     print(f"[ASR QUEUE] starting (waited {queue_wait_ms:.0f}ms for a worker)", flush=True)
@@ -84,7 +82,7 @@ def process_job(tmp_name, enqueue_time):
             # decoder toward the name "Balthazar" (otherwise heard as "Beth Azar" etc).
             infer_start = time.time()
             segments, info = whisper_model.transcribe(
-                tmp_name,
+                audio,
                 beam_size=1,
                 vad_filter=True,
                 condition_on_previous_text=False,
@@ -102,9 +100,6 @@ def process_job(tmp_name, enqueue_time):
             return {"error": "faster-whisper model unavailable."}, 500
     except Exception as e:
         return {"error": str(e)}, 500
-    finally:
-        if os.path.exists(tmp_name):
-            os.unlink(tmp_name)
 
 @app.route('/transcribe', methods=['POST'])
 def transcribe():
@@ -130,13 +125,15 @@ def transcribe():
             return jsonify({"error": "Dropped due to queue overflow"}), 429
         _in_flight += 1
 
-    tmp_name = None
     try:
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            sf.write(tmp.name, arr, 16000, subtype='PCM_16')
-            tmp_name = tmp.name
-
-        future = executor.submit(process_job, tmp_name, time.time())
+        # Hand faster-whisper the samples directly instead of writing a temp
+        # 16-bit WAV and having it re-open + decode that file through PyAV on
+        # every request. A path input goes through decode_audio(), which for
+        # this exact format (16kHz mono s16) yields int16 / 32768 as float32 —
+        # the same array built here, minus the disk write, file decode, and
+        # temp-file cleanup per utterance.
+        audio = arr.astype(np.float32) / 32768.0
+        future = executor.submit(process_job, audio, time.time())
         try:
             data, code = future.result(timeout=JOB_TIMEOUT + 5)
         except concurrent.futures.TimeoutError:
