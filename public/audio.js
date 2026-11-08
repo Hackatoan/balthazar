@@ -9,6 +9,18 @@ let savedToken = '';
 try { savedToken = localStorage.getItem('balthazar_token') || ''; } catch (_) {}
 const socket = io({ auth: { token: urlToken || savedToken } });
 
+// Escape a value for interpolation into innerHTML, in both text and quoted
+// attribute positions. Clip titles, usernames and transcripts originate from
+// Discord users, so they must never be able to break out of markup.
+function escapeHtml(v) {
+  return String(v == null ? '' : v)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // Connection lifecycle handling
 socket.on('connect_error', () => {
   try { socket.connect(); } catch (e){}
@@ -280,20 +292,22 @@ function renderClips(guildId, items) {
     div.style.borderBottom = '1px solid #3a3f44';
 
     const timeStr = c.timestamp ? new Date(c.timestamp).toLocaleTimeString() : '';
-    const safeUrl = String(c.url).replace(/"/g, '&quot;');
-    const safeName = (c.title || c.filename || 'Clip').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const safeReq = (c.requestedBy || 'Unknown').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const safeUrl = escapeHtml(c.url);
+    const safeName = escapeHtml(c.title || c.filename || 'Clip');
+    const safeReq = escapeHtml(c.requestedBy || 'Unknown');
+    const safeGuild = escapeHtml(guildId);
+    const safeTime = escapeHtml(timeStr);
 
-    let html = `<div style="margin-bottom:6px;"><span style="color:#72767d;font-size:0.85em;margin-right:8px;">[${timeStr}]</span>` +
+    let html = `<div style="margin-bottom:6px;"><span style="color:#72767d;font-size:0.85em;margin-right:8px;">[${safeTime}]</span>` +
                  `<strong>${safeReq}</strong> created a clip: <a href="${safeUrl}" target="_blank" rel="noopener" style="color:#5865f2;text-decoration:none;">${safeName}</a></div>`;
 
     html += `<audio controls src="${safeUrl}" style="height:32px;outline:none;width:100%;margin-bottom:6px;"></audio>`;
 
     html += `<div style="display:flex;gap:8px;font-size:0.85em;">`;
     html += `<button class="copy-btn" data-url="${safeUrl}" style="background:#4f545c;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;">Copy</button>`;
-    html += `<button class="replay-btn" data-url="${safeUrl}" data-guild="${guildId}" style="background:#3a994e;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;" title="Play this back into the voice channel">▶ Play in channel</button>`;
-    html += `<button class="assign-btn" data-url="${safeUrl}" data-title="${safeName}" data-guild="${guildId}" style="background:#5865f2;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;" title="Assign to selected user">Assign</button>`;
-    html += `<button class="remove-btn" data-url="${safeUrl}" data-guild="${guildId}" style="background:#ed4245;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;" title="Remove from selected user">Remove</button>`;
+    html += `<button class="replay-btn" data-url="${safeUrl}" data-guild="${safeGuild}" style="background:#3a994e;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;" title="Play this back into the voice channel">▶ Play in channel</button>`;
+    html += `<button class="assign-btn" data-url="${safeUrl}" data-title="${safeName}" data-guild="${safeGuild}" style="background:#5865f2;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;" title="Assign to selected user">Assign</button>`;
+    html += `<button class="remove-btn" data-url="${safeUrl}" data-guild="${safeGuild}" style="background:#ed4245;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;" title="Remove from selected user">Remove</button>`;
     html += `</div>`;
 
     div.innerHTML = html;
@@ -378,8 +392,8 @@ socket.on('transcript', (data) => {
   if (!g) return;
   const div = document.createElement('div');
   div.style.marginBottom = '6px';
-  const safeName = String(data.username || 'Unknown').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  const safeText = String(data.text || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const safeName = escapeHtml(data.username || 'Unknown');
+  const safeText = escapeHtml(data.text || '');
   div.innerHTML = `<strong style="color:#5865f2;">${safeName}:</strong> <span style="color:#dcddde;">${safeText}</span>`;
   g.transcriptEl.appendChild(div);
   g.transcriptEl.scrollTop = g.transcriptEl.scrollHeight;
@@ -431,12 +445,12 @@ socket.on('update', data => {
     div.role = 'button';
     div.tabIndex = 0;
     const vol = userVolumes[m.id] != null ? userVolumes[m.id] : 1;
-    const safeUsername = String(m.username || 'Unknown').replace(/"/g, '&quot;');
+    const safeUsername = escapeHtml(m.username || 'Unknown');
     div.setAttribute('aria-label', `Select ${m.username} to listen to or control their audio`);
     div.setAttribute('aria-pressed', g.playMode === m.id ? 'true' : 'false');
-    div.innerHTML = `<img src="${m.avatar}" alt="${safeUsername}'s avatar" style="width:32px;height:32px;border-radius:50%;margin-right:8px;">`+
-      `<span style="margin-right:6px;">${m.username}</span>`+
-      `<input type="range" class="vol-slider" min="0" max="200" value="${Math.round(vol * 100)}" data-userid="${m.id}" data-guild="${guildId}" aria-label="${safeUsername} volume" title="Volume (${Math.round(vol * 100)}%)" style="width:70px;">`;
+    div.innerHTML = `<img src="${escapeHtml(m.avatar)}" alt="${safeUsername}'s avatar" style="width:32px;height:32px;border-radius:50%;margin-right:8px;">`+
+      `<span style="margin-right:6px;">${safeUsername}</span>`+
+      `<input type="range" class="vol-slider" min="0" max="200" value="${Math.round(vol * 100)}" data-userid="${escapeHtml(m.id)}" data-guild="${escapeHtml(guildId)}" aria-label="${safeUsername} volume" title="Volume (${Math.round(vol * 100)}%)" style="width:70px;">`;
     g.membersEl.appendChild(div);
   });
 
