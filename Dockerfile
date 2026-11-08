@@ -14,6 +14,12 @@ RUN npm ci --omit=dev || npm i --production
 # Copy source
 COPY . .
 
+# Run as the image's unprivileged "node" user (uid 1000) instead of root.
+# The app writes to /app/data, /app/public/{clips,uploads} and
+# /app/clips-config.json, so hand /app to that user.
+RUN mkdir -p data public/clips public/uploads && chown -R node:node /app
+USER node
+
 ENV PORT=3000
 EXPOSE 3000
 
