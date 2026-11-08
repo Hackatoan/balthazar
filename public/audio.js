@@ -563,8 +563,14 @@ document.addEventListener('DOMContentLoaded', () => {
   socket.on('play_error', (msg) => setStatus(`Playback error: ${msg || ''}`));
   socket.on('play_saved', ({ url, name }) => {
     if (!url) return;
-    const safe = String(url).replace(/"/g, '&quot;');
-    setStatus(`Saved on server: <a href="${safe}" target="_blank" rel="noopener">${name || safe}</a>`);
+    // setStatus() writes textContent, so the old HTML string showed up as raw
+    // tags. Build a real link instead (same-origin path or http(s) only).
+    const href = String(url);
+    if (!status || !(href.startsWith('/') || /^https?:\/\//i.test(href))) { setStatus(`Saved on server: ${name || href}`); return; }
+    const a = document.createElement('a');
+    a.href = href; a.target = '_blank'; a.rel = 'noopener';
+    a.textContent = name || href;
+    status.replaceChildren('Saved on server: ', a);
   });
 });
 
