@@ -388,6 +388,7 @@ socket.on('replay_started', () => showToast('Now playing in voice channel'));
 socket.on('replay_ended', () => showToast('Playback finished'));
 socket.on('replay_error', (msg) => showToast(`Replay failed: ${msg || ''}`));
 
+const MAX_TRANSCRIPT_LINES = 300;
 socket.on('transcript', (data) => {
   if (!data || !data.guildId) return;
   const g = getGuildContainer(data.guildId);
@@ -398,6 +399,12 @@ socket.on('transcript', (data) => {
   const safeText = escapeHtml(data.text || '');
   div.innerHTML = `<strong style="color:#5865f2;">${safeName}:</strong> <span style="color:#dcddde;">${safeText}</span>`;
   g.transcriptEl.appendChild(div);
+  // The transcript box is a 200px scroller that only ever grew: every line of
+  // every utterance for the life of the tab stayed in the DOM, and each new one
+  // pays for a scrollHeight layout over all of them. Keep the most recent lines.
+  while (g.transcriptEl.childElementCount > MAX_TRANSCRIPT_LINES) {
+    g.transcriptEl.firstElementChild.remove();
+  }
   g.transcriptEl.scrollTop = g.transcriptEl.scrollHeight;
 });
 
