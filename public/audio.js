@@ -301,13 +301,13 @@ function renderClips(guildId, items) {
     let html = `<div style="margin-bottom:6px;"><span style="color:#72767d;font-size:0.85em;margin-right:8px;">[${safeTime}]</span>` +
                  `<strong>${safeReq}</strong> created a clip: <a href="${safeUrl}" target="_blank" rel="noopener" style="color:#5865f2;text-decoration:none;">${safeName}</a></div>`;
 
-    html += `<audio controls src="${safeUrl}" style="height:32px;outline:none;width:100%;margin-bottom:6px;"></audio>`;
+    html += `<audio controls src="${safeUrl}" aria-label="${safeName}" style="height:32px;width:100%;margin-bottom:6px;"></audio>`;
 
     html += `<div style="display:flex;gap:8px;font-size:0.85em;">`;
-    html += `<button class="copy-btn" data-url="${safeUrl}" style="background:#4f545c;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;">Copy</button>`;
-    html += `<button class="replay-btn" data-url="${safeUrl}" data-guild="${safeGuild}" style="background:#3a994e;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;" title="Play this back into the voice channel">▶ Play in channel</button>`;
-    html += `<button class="assign-btn" data-url="${safeUrl}" data-title="${safeName}" data-guild="${safeGuild}" style="background:#5865f2;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;" title="Assign to selected user">Assign</button>`;
-    html += `<button class="remove-btn" data-url="${safeUrl}" data-guild="${safeGuild}" style="background:#ed4245;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;" title="Remove from selected user">Remove</button>`;
+    html += `<button class="copy-btn" data-url="${safeUrl}" style="background:#4f545c;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;" aria-label="Copy link to ${safeName}">Copy</button>`;
+    html += `<button class="replay-btn" data-url="${safeUrl}" data-guild="${safeGuild}" style="background:#3a994e;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;" aria-label="Play in channel: ${safeName}" title="Play this back into the voice channel">▶ Play in channel</button>`;
+    html += `<button class="assign-btn" data-url="${safeUrl}" data-title="${safeName}" data-guild="${safeGuild}" style="background:#5865f2;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;" aria-label="Assign ${safeName} to selected user" title="Assign to selected user">Assign</button>`;
+    html += `<button class="remove-btn" data-url="${safeUrl}" data-guild="${safeGuild}" style="background:#ed4245;color:#fff;border:none;padding:4px 8px;border-radius:4px;cursor:pointer;" aria-label="Remove ${safeName} from selected user" title="Remove from selected user">Remove</button>`;
     html += `</div>`;
 
     div.innerHTML = html;
