@@ -668,14 +668,22 @@ class GuildManager {
 
       const buf = ring.buffer;
       const frameCount = totalSamples / 2;
-      for (let frame = 0; frame < frameCount; frame++) {
-        const readIdxL = (endIndex - totalSamples + frame * 2 + TOTAL_BUFFER_SAMPLES) % TOTAL_BUFFER_SAMPLES;
-        const readIdxR = (readIdxL + 1) % TOTAL_BUFFER_SAMPLES;
+      // Walk the ring with a wrapping cursor instead of recomputing two modulo
+      // indices per frame (up to 5.76M frames per speaker for a 120s clip, all
+      // synchronous on the voice event loop). Same indices as
+      // (endIndex - totalSamples + frame*2) mod N and its +1 neighbour; note the
+      // start can be odd, so the R index can wrap on its own.
+      let readIdxL = (endIndex - totalSamples + TOTAL_BUFFER_SAMPLES) % TOTAL_BUFFER_SAMPLES;
+      for (let frame = 0, out = 0; frame < frameCount; frame++, out += 2) {
+        let readIdxR = readIdxL + 1;
+        if (readIdxR === TOTAL_BUFFER_SAMPLES) readIdxR = 0;
         // Discord's per-user decode duplicates mono into L/R — collapse back to
         // one sample before repanning rather than trusting the duplicate.
         const mono = (buf[readIdxL] + buf[readIdxR]) / 2 * volume;
-        result[frame * 2] += mono * gainL;
-        result[frame * 2 + 1] += mono * gainR;
+        result[out] += mono * gainL;
+        result[out + 1] += mono * gainR;
+        readIdxL += 2;
+        if (readIdxL >= TOTAL_BUFFER_SAMPLES) readIdxL -= TOTAL_BUFFER_SAMPLES;
       }
     }
 
