@@ -312,15 +312,23 @@ class GuildManager {
     this.client.guilds.cache.forEach(guild => {
       if (!this.userJoinTimestamps[guild.id]) this.userJoinTimestamps[guild.id] = {};
       const now = Date.now();
+      const inVoice = new Set();
       guild.channels.cache.forEach(channel => {
         if (channel.type === 2) {
           for (const [userId, member] of channel.members) {
+            inVoice.add(userId);
             if (!this.userJoinTimestamps[guild.id][userId]) {
               this.userJoinTimestamps[guild.id][userId] = now;
             }
           }
         }
       });
+      // Forget users who left voice: otherwise the map grows forever and a
+      // returning user keeps their original stamp, so they count as "stable"
+      // immediately and skip the MIN_STABLE_MS wait.
+      for (const userId of Object.keys(this.userJoinTimestamps[guild.id])) {
+        if (!inVoice.has(userId)) delete this.userJoinTimestamps[guild.id][userId];
+      }
 
       const state = this.getGuildState(guild.id);
       const channel = this.getMostPopulatedVoiceChannel(guild);
