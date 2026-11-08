@@ -42,7 +42,7 @@ class MatrixAsrClient {
   constructor(webUI, roomManager) {
     this.webUI        = webUI;
     this.roomManager  = roomManager;
-    // roomId:userId → { asrBuf: Int16[], transcribeQueue: Promise }
+    // roomId:userId → { asrChunks: Int16Array[], asrLen: number, transcribeQueue: Promise }
     this._streams = new Map();
   }
 
@@ -54,15 +54,21 @@ class MatrixAsrClient {
     const key = `${roomId}:${userId}`;
     if (!this._streams.has(key)) {
       this._streams.set(key, {
-        asrBuf:          [],
+        asrChunks:       [],
+        asrLen:          0,
         transcribeQueue: Promise.resolve(),
         silenceTimer:    null,
       });
     }
     const st = this._streams.get(key);
 
-    // Push samples
-    for (let i = 0; i < pcm16Stereo.length; i++) st.asrBuf.push(pcm16Stereo[i]);
+    // Keep a copy of the frame (the SDK may reuse its buffer) as one typed-array
+    // chunk instead of pushing every sample onto a plain JS array — that was
+    // 1920 Array.push calls per 20ms frame per speaker, a boxed-number array
+    // growing without a size hint, and another full Int16Array.from() pass to
+    // convert it back on flush.
+    st.asrChunks.push(pcm16Stereo.slice());
+    st.asrLen += pcm16Stereo.length;
 
     // Reset silence timer — flush 500ms after the last frame arrives
     if (st.silenceTimer) clearTimeout(st.silenceTimer);
@@ -71,10 +77,13 @@ class MatrixAsrClient {
 
   _flush(roomId, userId, key) {
     const st = this._streams.get(key);
-    if (!st || st.asrBuf.length < STEREO_INT16_SAMPLES_PER_SEC * 0.2) return;
+    if (!st || st.asrLen < STEREO_INT16_SAMPLES_PER_SEC * 0.2) return;
 
-    const pcmRaw = Int16Array.from(st.asrBuf);
-    st.asrBuf = [];
+    const pcmRaw = new Int16Array(st.asrLen);
+    let off = 0;
+    for (const c of st.asrChunks) { pcmRaw.set(c, off); off += c.length; }
+    st.asrChunks = [];
+    st.asrLen = 0;
 
     let chunk16k = downsampleTo16kMono(pcmRaw);
     chunk16k     = normalizeToTargetRms(chunk16k, 0.1, 6.0);
