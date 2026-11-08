@@ -324,11 +324,15 @@ function ensureToast() {
   document.body.appendChild(toastEl);
   return toastEl;
 }
+// Each new toast restarts the hide timer, so a quick follow-up message isn't
+// hidden early by the previous toast's timeout.
+let toastTimer = null;
 function showToast(msg) {
   const el = ensureToast();
   el.textContent = msg || '';
   el.style.opacity = '1';
-  setTimeout(() => { el.style.opacity = '0'; }, 1200);
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.style.opacity = '0'; }, 2500);
 }
 
 document.addEventListener('click', async (e) => {
