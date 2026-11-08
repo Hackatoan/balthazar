@@ -18,7 +18,11 @@ const client = new Client({
     GatewayIntentBits.GuildVoiceStates,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent
-  ]
+  ],
+  // Several replies echo user-supplied text (clip titles, /say and -say
+  // messages, -clipfolder listings). Only let direct user mentions ping, so
+  // that text can't trigger @everyone/@here or role pings through the bot.
+  allowedMentions: { parse: ['users'], repliedUser: true }
 });
 
 const webUI = new WebUI();
