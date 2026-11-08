@@ -19,6 +19,31 @@ const CLIP_CHANNELS = 2;
 const MIN_STABLE_MS = 3000;
 const TOTAL_BUFFER_SAMPLES = CLIP_SAMPLE_RATE * CLIP_CHANNELS * BUFFER_SECONDS;
 
+// Ring-buffer helpers for writeToUserRing(): copy/zero in at most two
+// contiguous spans (before and after the wrap point) with TypedArray.set()/
+// fill() instead of one modulo-indexed JS store per sample. Same resulting
+// buffer contents and write position as the per-sample loops they replace.
+function ringWrite(buf, pos, src) {
+  const size = buf.length;
+  let off = 0;
+  while (off < src.length) {
+    const n = Math.min(src.length - off, size - pos);
+    buf.set(src.subarray(off, off + n), pos);
+    off += n;
+    pos = (pos + n) % size;
+  }
+  return pos;
+}
+function ringZero(buf, start, count) {
+  const size = buf.length;
+  while (count > 0) {
+    const n = Math.min(count, size - start);
+    buf.fill(0, start, start + n);
+    count -= n;
+    start = (start + n) % size;
+  }
+}
+
 // playClipIntoChannel() is meant to fetch only clips we ourselves posted:
 // Discord's CDN, or our own self-hosted /clips/ URL (CLIPS_BASE_URL). The web
 // panel's "Play in channel" / assign-clip flow passes a client-supplied URL
@@ -593,16 +618,11 @@ class GuildManager {
         let gapSamplesToClear = Math.floor(gapMs * 96);
         if (gapSamplesToClear > TOTAL_BUFFER_SAMPLES) gapSamplesToClear = TOTAL_BUFFER_SAMPLES;
         let clearStartIndex = Math.floor(ring.lastWriteTimeMs * 96) % TOTAL_BUFFER_SAMPLES;
-        for (let i = 0; i < gapSamplesToClear; i++) {
-          buf[(clearStartIndex + i) % TOTAL_BUFFER_SAMPLES] = 0;
-        }
+        ringZero(buf, clearStartIndex, gapSamplesToClear);
       }
     }
 
-    for (let i = 0; i < pcmSamples; i++) {
-      buf[ring.writePos] = pcm16Stereo[i];
-      ring.writePos = (ring.writePos + 1) % TOTAL_BUFFER_SAMPLES;
-    }
+    ring.writePos = ringWrite(buf, ring.writePos, pcm16Stereo);
 
     // Since we write sequentially, the "effective" write time increments by exactly the duration of the packet
     if (gapMs > 100) {

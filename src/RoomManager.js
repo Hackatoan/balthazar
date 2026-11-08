@@ -13,6 +13,31 @@ const TOTAL_CLIP_SAMPLES = CLIP_SAMPLE_RATE * CLIP_CHANNELS * CLIP_SECONDS;
 const MIN_STABLE_MS     = 3000;
 const KEEP_UPLOADS      = process.env.KEEP_UPLOADS === '1';
 
+// Ring-buffer helpers for writeToUserRing(): copy/zero in at most two
+// contiguous spans (before and after the wrap point) with TypedArray.set()/
+// fill() instead of one modulo-indexed JS store per sample. Same resulting
+// buffer contents and write position as the per-sample loops they replace.
+function ringWrite(buf, pos, src) {
+  const size = buf.length;
+  let off = 0;
+  while (off < src.length) {
+    const n = Math.min(src.length - off, size - pos);
+    buf.set(src.subarray(off, off + n), pos);
+    off += n;
+    pos = (pos + n) % size;
+  }
+  return pos;
+}
+function ringZero(buf, start, count) {
+  const size = buf.length;
+  while (count > 0) {
+    const n = Math.min(count, size - start);
+    buf.fill(0, start, start + n);
+    count -= n;
+    start = (start + n) % size;
+  }
+}
+
 const DATA_DIR    = path.join(__dirname, '..', 'data');
 const CONFIG_FILE = path.join(__dirname, '..', 'clips-config.json');
 
@@ -113,14 +138,11 @@ class RoomManager {
       if (ring.lastWriteTimeMs > 0) {
         let gap = Math.min(Math.floor(gapMs * 96), TOTAL_CLIP_SAMPLES);
         let s   = Math.floor(ring.lastWriteTimeMs * 96) % TOTAL_CLIP_SAMPLES;
-        for (let i = 0; i < gap; i++) buf[(s + i) % TOTAL_CLIP_SAMPLES] = 0;
+        ringZero(buf, s, gap);
       }
     }
 
-    for (let i = 0; i < pcmLen; i++) {
-      buf[ring.writePos] = pcm16Stereo[i];
-      ring.writePos = (ring.writePos + 1) % TOTAL_CLIP_SAMPLES;
-    }
+    ring.writePos = ringWrite(buf, ring.writePos, pcm16Stereo);
     ring.lastWriteTimeMs = gapMs > 100 ? now : ring.lastWriteTimeMs + pcmLen / 96;
 
     // Voice trigger detection — feed to ASR if available
