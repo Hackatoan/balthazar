@@ -205,7 +205,7 @@ function getGuildContainer(guildId) {
   if (sayBtn && sayInput) {
     const doSay = () => {
       const text = sayInput.value.trim();
-      if (!text) return;
+      if (!text) { showToast('Type something for Balthazar to say first'); sayInput.focus(); return; }
       socket.emit('say_text', { guildId, text });
       showToast('Speaking...');
       sayInput.value = '';
