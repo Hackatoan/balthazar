@@ -445,6 +445,7 @@ socket.on('update', data => {
   }
   if (membersSig !== g.membersSig) {
     g.membersSig = membersSig;
+    g.membersVersion = (g.membersVersion || 0) + 1;
     g.membersEl.innerHTML = '';
 
     (data.members || []).forEach(m => {
@@ -557,6 +558,31 @@ const JITTER_FRAMES = Math.ceil((SAMPLE_RATE * JITTER_MS) / 1000);
 let jitterReady = false;
 const CHANNELS = 2;
 
+// Which users the live mix should include. This used to be rebuilt inside
+// onaudioprocess — a querySelectorAll over every guild's member list plus a
+// fresh Set, on the audio callback, ~12 times a second. It only changes when a
+// guild's playMode changes or its member list is re-rendered (membersVersion),
+// so rebuild it only when that key changes.
+let activeUsersKey = null;
+let activeUsersCache = new Set();
+function getActiveUsers() {
+  const gs = Object.values(guildContainers);
+  let key = '';
+  for (const g of gs) key += `${g.guildId}:${g.playMode}:${g.membersVersion || 0}|`;
+  if (key === activeUsersKey) return activeUsersCache;
+  const activeUsers = new Set();
+  gs.forEach(g => {
+    if (g.playMode === 'all') {
+      g.membersEl.querySelectorAll('.member').forEach(el => activeUsers.add(el.dataset.userid));
+    } else {
+      activeUsers.add(g.playMode);
+    }
+  });
+  activeUsersKey = key;
+  activeUsersCache = activeUsers;
+  return activeUsers;
+}
+
 let scriptNode = null;
 function startAudioNode() {
   if (scriptNode) return;
@@ -577,14 +603,7 @@ function startAudioNode() {
     const outR = e.outputBuffer.getChannelData(1);
     outL.fill(0); outR.fill(0);
 
-    const activeUsers = new Set();
-    Object.values(guildContainers).forEach(g => {
-      if (g.playMode === 'all') {
-        g.membersEl.querySelectorAll('.member').forEach(el => activeUsers.add(el.dataset.userid));
-      } else {
-        activeUsers.add(g.playMode);
-      }
-    });
+    const activeUsers = getActiveUsers();
 
     const neededSamples = BUFFER_SIZE * CHANNELS;
     const slices = {};
