@@ -2,12 +2,22 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const path = require('path');
+const crypto = require('crypto');
 
 const PORT = process.env.PORT ? Number(process.env.PORT) : 3000;
 // Optional shared secret gating the control-plane socket (clip requests, "say"
 // TTS, mic injection into the live voice channel, and file uploads). Without
 // it, anyone who can reach this port can drive those actions anonymously.
 const WEB_UI_TOKEN = process.env.WEB_UI_TOKEN || '';
+
+// Constant-time token check: hashing both sides first gives equal-length
+// buffers for timingSafeEqual and avoids leaking the token length.
+function tokenMatches(provided, expected) {
+  if (typeof provided !== 'string' || !expected) return false;
+  const a = crypto.createHash('sha256').update(provided).digest();
+  const b = crypto.createHash('sha256').update(expected).digest();
+  return crypto.timingSafeEqual(a, b);
+}
 
 class WebUI {
   constructor() {
@@ -42,7 +52,7 @@ class WebUI {
       this.io.use((socket, next) => {
         const provided = (socket.handshake.auth && socket.handshake.auth.token)
           || socket.handshake.query.token;
-        if (provided === WEB_UI_TOKEN) return next();
+        if (tokenMatches(provided, WEB_UI_TOKEN)) return next();
         next(new Error('unauthorized'));
       });
     } else {
