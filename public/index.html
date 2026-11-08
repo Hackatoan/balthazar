@@ -11,6 +11,9 @@
     .members { display: flex; flex-wrap: wrap; gap: 12px; }
     .member { background: #36393f; border-radius: 6px; padding: 10px 16px; display: flex; align-items: center; }
     .member img { width: 32px; height: 32px; border-radius: 50%; margin-right: 10px; }
+    /* Empty-state hints until the first transcript line / clip arrives. */
+    .guild-transcript:empty::before { content: 'Live transcript will appear here when people talk.'; color: #ccc; font-style: italic; }
+    .guild-clips:empty::before { content: 'No clips yet.'; color: #ccc; font-style: italic; }
   </style>
 </head>
 <body>
