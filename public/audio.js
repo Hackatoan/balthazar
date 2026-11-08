@@ -668,12 +668,25 @@ function startAudioNode() {
   scriptNode.connect(audioCtx.destination);
 }
 
-socket.on('audio', ({ userId, data }) => {
+// The server now sends live PCM as binary (arrives as an ArrayBuffer); the
+// base64-string branch is kept so a panel tab still works against an older
+// server build during a deploy.
+function pcmFromPayload(data) {
+  if (data instanceof ArrayBuffer) return new Int16Array(data, 0, data.byteLength >> 1);
+  if (ArrayBuffer.isView(data)) {
+    const u8 = new Uint8Array(data.buffer, data.byteOffset, data.byteLength & ~1);
+    return new Int16Array(u8.slice().buffer);
+  }
   const bytes = atob(data);
   const len = bytes.length;
   const buf = new Uint8Array(len);
   for (let i = 0; i < len; i++) buf[i] = bytes.charCodeAt(i);
-  const samples = new Int16Array(buf.buffer, buf.byteOffset, Math.floor(buf.byteLength / 2));
+  return new Int16Array(buf.buffer, buf.byteOffset, Math.floor(buf.byteLength / 2));
+}
+
+socket.on('audio', ({ userId, data }) => {
+  if (data == null) return;
+  const samples = pcmFromPayload(data);
   const existing = userBuffers[userId];
   if (existing && existing.length > 0) {
     const merged = new Int16Array(existing.length + samples.length);

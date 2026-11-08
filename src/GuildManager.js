@@ -545,8 +545,12 @@ class GuildManager {
           energy.count += pcm.length;
         }
         // Live web-panel monitor: stream decoded audio only while a browser is watching.
+        // Sent as binary (socket.io ships Buffers as binary attachments) rather
+        // than base64 text: no per-packet encode here, no atob + per-byte decode
+        // loop in the browser, and ~25% less bytes on the wire. Copied so a
+        // reused decoder buffer can't change under a still-queued send.
         if (this.webUI && this.webUI.hasClients && this.webUI.hasClients()) {
-          this.webUI.emitToAll('audio', { userId, data: buf.toString('base64') });
+          this.webUI.emitToAll('audio', { userId, data: Buffer.from(buf) });
         }
         if (utter && utter.len < 48000 * 2 * 20) { // cap ~20s of 48k stereo
           utter.chunks.push(pcm.slice()); // copy: decoder buffer is reused
@@ -934,7 +938,9 @@ class GuildManager {
       const end = Math.min(offset + chunkBytes, buffer.length);
       const chunk = buffer.subarray(offset, end);
       offset = end;
-      try { this.webUI.emitToAll('audio', { userId: speakerId, data: chunk.toString('base64') }); } catch (_) {}
+      // Binary, same as the live speaker monitor (see joinAndMonitor). `buffer`
+      // is never mutated after playback starts, so the subarray view is safe.
+      try { this.webUI.emitToAll('audio', { userId: speakerId, data: chunk }); } catch (_) {}
     }, chunkMs);
   }
 
