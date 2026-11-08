@@ -3,7 +3,6 @@ const { spawn } = require('child_process');
 const { PassThrough } = require('stream');
 const prism = require('prism-media');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const wav = require('wav');
 const axios = require('axios');
@@ -97,7 +96,7 @@ function normalizeInPlace(float32arr) {
 // Pulls the raw PCM samples out of a standard RIFF/WAVE file (walks chunks
 // looking for 'data' rather than assuming a fixed 44-byte header, since not
 // every WAV writer omits extra chunks). Our own clips are always 48kHz
-// stereo s16le, which is exactly what playRawPcmFromDisk expects.
+// stereo s16le, which is exactly what playRawPcm expects.
 function extractPcmFromWav(buffer) {
   if (buffer.length < 12 || buffer.toString('ascii', 0, 4) !== 'RIFF' || buffer.toString('ascii', 8, 12) !== 'WAVE') {
     return null;
@@ -716,7 +715,7 @@ class GuildManager {
   // --- Web-dashboard mic-in: relay a browser's microphone into the voice call ---
   // Raw 48kHz stereo s16le PCM only — same StreamType.Raw path used for Piper's
   // /talk TTS output, so no ffmpeg subprocess sits in the way (see comment on
-  // playRawPcmFromDisk below for why that matters on this host).
+  // playRawPcm below for why that matters on this host).
   startWebMic(guildId) {
     const state = this.getGuildState(guildId);
     if (!state.currentConnection) return false;
@@ -863,7 +862,13 @@ class GuildManager {
   // that subprocess is exactly what was glitching the bot's own voice mid-reply.
   // StreamType.Raw skips ffmpeg entirely: @discordjs/opus encodes the (already
   // final-format) PCM in-process, no subprocess, nothing to starve mid-stream.
-  async playRawPcmFromDisk(guildId, filePath, onStart, onEnd, onError) {
+  //
+  // Takes the PCM as an in-memory Buffer: both callers already hold it in
+  // memory (Piper's HTTP response / the downloaded clip), so round-tripping it
+  // through a temp file meant a blocking writeFileSync before playback, a disk
+  // read stream during it, and a second blocking readFileSync of the whole file
+  // on Playing for the dashboard monitor — all on the voice event loop.
+  async playRawPcm(guildId, pcm, onStart, onEnd, onError) {
     try {
       const state = this.getGuildState(guildId);
       if (!state.currentConnection) throw new Error('No voice connection');
@@ -873,15 +878,17 @@ class GuildManager {
         try { state.currentConnection.subscribe(state.currentPlayer); } catch (_) {}
       }
 
-      const resource = createAudioResource(fs.createReadStream(filePath), { inputType: StreamType.Raw });
+      const source = new PassThrough();
+      source.end(pcm);
+      const resource = createAudioResource(source, { inputType: StreamType.Raw });
 
       const started = () => {
         onStart && onStart();
         try { state.currentPlayer.off(AudioPlayerStatus.Playing, started); } catch (_) {}
-        // Separate read of the same file, paced on its own timer — deliberately NOT
-        // sharing the fs.createReadStream() above, so a slow/eager dashboard listener
-        // can never affect the actual Discord playback timing.
-        try { this.broadcastLivePcm(guildId, fs.readFileSync(filePath), this.client.user?.id); } catch (_) {}
+        // Paced on its own timer over read-only subarray views of the same buffer —
+        // deliberately NOT sharing the playback stream above, so a slow/eager
+        // dashboard listener can never affect the actual Discord playback timing.
+        try { this.broadcastLivePcm(guildId, pcm, this.client.user?.id); } catch (_) {}
       };
       const ended = () => { onEnd && onEnd(); try { state.currentPlayer.off(AudioPlayerStatus.Idle, ended); } catch (_) {} };
       try { state.currentPlayer.removeAllListeners(AudioPlayerStatus.Playing); } catch (_) {}
@@ -936,17 +943,7 @@ class GuildManager {
       const pcm = extractPcmFromWav(Buffer.from(res.data));
       if (!pcm) throw new Error('Could not read clip audio (not a recognized WAV)');
 
-      const dir = path.join(os.tmpdir(), 'balthazar-replay');
-      fs.mkdirSync(dir, { recursive: true });
-      const file = path.join(dir, `replay-${guildId}-${Date.now()}.pcm`);
-      fs.writeFileSync(file, pcm);
-      const cleanup = () => { try { fs.unlinkSync(file); } catch (_) {} };
-
-      await this.playRawPcmFromDisk(guildId, file,
-        onStart,
-        () => { cleanup(); onEnd && onEnd(); },
-        (err) => { cleanup(); onError && onError(err); }
-      );
+      await this.playRawPcm(guildId, pcm, onStart, onEnd, onError);
     } catch (e) {
       console.warn(`[voice][${guildId}] clip replay error: ${e?.message || e}`);
       if (onError) onError(e);
