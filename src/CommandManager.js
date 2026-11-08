@@ -225,7 +225,7 @@ class CommandManager {
         const parts = rawContent.split(/\s+/);
         if (parts.length < 2) { await message.reply('Usage: -clipfolder @user'); return; }
         const uid = parts[1].replace(/[<@!>]/g, '');
-        const entries = this.guildManager.getUserClips(uid);
+        const entries = this.guildManager.getUserClips(uid, message.guild.id);
         if (!entries || entries.length === 0) { await message.reply('No clips for that user.'); return; }
         const urls = entries.slice(-50).reverse().map(e => `${e.url} ${e.title ? '- ' + e.title : ''}`);
         try { await message.reply(`Clips for <@${uid}>:\n${urls.join('\n')}`); } catch (_) { await message.reply('Failed to send clip list.'); }

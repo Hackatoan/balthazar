@@ -736,7 +736,7 @@ class GuildManager {
 
   addUserClip(userId, title, url, guildId) {
       if (!userClips[userId]) userClips[userId] = [];
-      userClips[userId].push({ url, timestamp: Date.now(), title: title || '' });
+      userClips[userId].push({ url, timestamp: Date.now(), title: title || '', guildId: guildId || null });
       saveUserClips();
       this.webUI.emitToAll('user_clips_updated', { guildId, userId, clips: userClips[userId] });
   }
@@ -748,8 +748,14 @@ class GuildManager {
       this.webUI.emitToAll('user_clips_updated', { guildId, userId, clips: userClips[userId] });
   }
 
-  getUserClips(userId) {
-      return userClips[userId] || [];
+  // With a guildId, only return clips recorded in that guild, so members of
+  // one server can't list a user's clips from other servers the bot is in.
+  // Entries saved before guildId was recorded have no guild and are excluded
+  // from scoped lookups.
+  getUserClips(userId, guildId) {
+      const all = userClips[userId] || [];
+      if (guildId === undefined) return all;
+      return all.filter(e => e.guildId && e.guildId === guildId);
   }
 
   _looksLikeTrigger(ctx) {
