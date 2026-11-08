@@ -493,6 +493,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const playBtn = document.getElementById('play-btn');
   const status = document.getElementById('play-status');
   let objectUrl = '';
+  let selectedFile = null; // last file picked via the input OR dropped on the drop zone
 
   function setStatus(msg) { if (status) status.textContent = msg || ''; }
 
@@ -500,6 +501,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!file) return;
     try { if (objectUrl) URL.revokeObjectURL(objectUrl); } catch (_) {}
     objectUrl = URL.createObjectURL(file);
+    selectedFile = file;
     setStatus(`Selected: ${file.name} (${Math.round(file.size/1024)} KB)`);
   }
 
@@ -515,12 +517,16 @@ document.addEventListener('DOMContentLoaded', () => {
     dropZone.addEventListener('drop', (e) => {
       e.preventDefault(); dropZone.style.borderColor = '#3a3f44';
       const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-      if (f) setFile(f);
+      if (f) {
+        // Mirror the drop into the file input too, so it shows the filename.
+        try { if (fileInput) fileInput.files = e.dataTransfer.files; } catch (_) {}
+        setFile(f);
+      }
     });
   }
   if (playBtn) {
     playBtn.addEventListener('click', async () => {
-      const f = (fileInput && fileInput.files && fileInput.files[0]) || null;
+      const f = selectedFile || (fileInput && fileInput.files && fileInput.files[0]) || null;
       if (!f) { setStatus('Please select a file first.'); return; }
       try { if (audioCtx && audioCtx.state === 'suspended') await audioCtx.resume(); } catch (_) {}
       try {
