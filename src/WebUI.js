@@ -27,6 +27,13 @@ class WebUI {
       res.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; media-src 'self' blob:; connect-src 'self' ws: wss:");
       next();
     });
+    // Uploaded files keep whatever extension the client sent and are served
+    // from the panel's own origin. Sandbox them so an uploaded HTML/SVG file
+    // opened in a browser can't run script with the panel's origin/storage.
+    this.app.use('/uploads', (req, res, next) => {
+      res.setHeader('Content-Security-Policy', 'sandbox');
+      next();
+    });
     this.app.use(express.static(path.join(__dirname, '..', 'public')));
   }
 
