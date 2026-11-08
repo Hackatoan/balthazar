@@ -407,8 +407,17 @@ socket.on('update', data => {
 
   g.channelEl.textContent = `Channel: ${data.channel.name}`;
 
+  // The server re-sends this snapshot every 2s per guild whether or not
+  // anything changed. Only rebuild the clip-channel <select> and the member
+  // list when their contents actually differ from what's already rendered —
+  // otherwise every tick tears down and recreates every option, member row,
+  // avatar <img> and volume slider (and re-binds their handlers) for nothing.
+  const textChSig = JSON.stringify([data.textChannels || null, data.clipChannelId || null]);
+  const membersSig = JSON.stringify(data.members || []);
+
   const clipChannelSelector = g.container.querySelector('.clip-channel-selector');
-  if (clipChannelSelector && data.textChannels) {
+  if (clipChannelSelector && data.textChannels && textChSig !== g.textChSig) {
+    g.textChSig = textChSig;
     const currentVal = clipChannelSelector.value;
     clipChannelSelector.innerHTML = '<option value="">Default Clip Channel</option>';
     data.textChannels.forEach(c => {
@@ -436,25 +445,28 @@ socket.on('update', data => {
     }
     option.textContent = `${data.channel.name} (${guildId})`;
   }
-  g.membersEl.innerHTML = '';
+  if (membersSig !== g.membersSig) {
+    g.membersSig = membersSig;
+    g.membersEl.innerHTML = '';
 
-  (data.members || []).forEach(m => {
-    const div = document.createElement('div');
-    div.className = 'member';
-    div.dataset.userid = m.id;
-    div.role = 'button';
-    div.tabIndex = 0;
-    const vol = userVolumes[m.id] != null ? userVolumes[m.id] : 1;
-    const safeUsername = escapeHtml(m.username || 'Unknown');
-    div.setAttribute('aria-label', `Select ${m.username} to listen to or control their audio`);
-    div.setAttribute('aria-pressed', g.playMode === m.id ? 'true' : 'false');
-    div.innerHTML = `<img src="${escapeHtml(m.avatar)}" alt="${safeUsername}'s avatar" style="width:32px;height:32px;border-radius:50%;margin-right:8px;">`+
-      `<span style="margin-right:6px;">${safeUsername}</span>`+
-      `<input type="range" class="vol-slider" min="0" max="200" value="${Math.round(vol * 100)}" data-userid="${escapeHtml(m.id)}" data-guild="${escapeHtml(guildId)}" aria-label="${safeUsername} volume" title="Volume (${Math.round(vol * 100)}%)" style="width:70px;">`;
-    g.membersEl.appendChild(div);
-  });
+    (data.members || []).forEach(m => {
+      const div = document.createElement('div');
+      div.className = 'member';
+      div.dataset.userid = m.id;
+      div.role = 'button';
+      div.tabIndex = 0;
+      const vol = userVolumes[m.id] != null ? userVolumes[m.id] : 1;
+      const safeUsername = escapeHtml(m.username || 'Unknown');
+      div.setAttribute('aria-label', `Select ${m.username} to listen to or control their audio`);
+      div.setAttribute('aria-pressed', g.playMode === m.id ? 'true' : 'false');
+      div.innerHTML = `<img src="${escapeHtml(m.avatar)}" alt="${safeUsername}'s avatar" style="width:32px;height:32px;border-radius:50%;margin-right:8px;">`+
+        `<span style="margin-right:6px;">${safeUsername}</span>`+
+        `<input type="range" class="vol-slider" min="0" max="200" value="${Math.round(vol * 100)}" data-userid="${escapeHtml(m.id)}" data-guild="${escapeHtml(guildId)}" aria-label="${safeUsername} volume" title="Volume (${Math.round(vol * 100)}%)" style="width:70px;">`;
+      g.membersEl.appendChild(div);
+    });
 
-  setUserClickHandlers(g);
+    setUserClickHandlers(g);
+  }
 
   if (g.playMode !== 'all') {
     const stillPresent = (data.members || []).some(m => m.id === g.playMode);
