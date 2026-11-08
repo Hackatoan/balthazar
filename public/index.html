@@ -35,7 +35,7 @@
       </div>
       <div class="members guild-members"></div>
       <div style="display:flex;gap:8px;margin-top:12px;">
-        <input type="text" class="say-input" placeholder="Type something for Balthazar to say..." style="flex:1;background:#2c2f33;color:#fff;border:1px solid #3a3f44;border-radius:6px;padding:8px;">
+        <input type="text" class="say-input" aria-label="Text for Balthazar to speak in the voice channel" placeholder="Type something for Balthazar to say..." style="flex:1;background:#2c2f33;color:#fff;border:1px solid #3a3f44;border-radius:6px;padding:8px;">
         <button class="say-btn" title="Speak this into the voice channel" style="padding:6px 14px;border-radius:8px;background:#5865f2;color:#fff;border:none;cursor:pointer;">🗣️ Speak</button>
       </div>
       <div class="guild-transcript" role="log" aria-live="polite" aria-relevant="additions" aria-label="Live transcript" style="margin-top:24px;background:#23272a;padding:12px 16px;border-radius:8px;min-height:48px;max-height:200px;overflow-y:auto;font-size:1.05em;"></div>
@@ -46,8 +46,8 @@
   <div class="container" style="max-width:600px;margin-top:12px;background:#25282c;">
     <div style="font-size:1.2em;margin-bottom:8px;">Play audio into Discord</div>
     <div id="play-panel" style="display:flex;flex-direction:column;gap:10px;">
-      <select id="guild-selector" style="background:#2c2f33;color:#fff;border:1px solid #3a3f44;border-radius:6px;padding:8px;"><option value="">Select a Server</option></select>
-      <input type="file" id="file-input" accept="audio/mp3,audio/mpeg,audio/wav" style="background:#2c2f33;color:#fff;border:1px solid #3a3f44;border-radius:6px;padding:8px;"/>
+      <select id="guild-selector" aria-label="Server to play audio into" style="background:#2c2f33;color:#fff;border:1px solid #3a3f44;border-radius:6px;padding:8px;"><option value="">Select a Server</option></select>
+      <input type="file" id="file-input" aria-label="Audio file to play (MP3 or WAV)" accept="audio/mp3,audio/mpeg,audio/wav" style="background:#2c2f33;color:#fff;border:1px solid #3a3f44;border-radius:6px;padding:8px;"/>
       <div id="drop-zone" style="border:2px dashed #3a3f44;border-radius:8px;padding:16px;text-align:center;color:#ccc;">Drop MP3/WAV here</div>
       <button id="play-btn" style="padding:8px 12px;border-radius:8px;background:#3a994e;color:#fff;border:none;cursor:pointer;">Play in Discord</button>
       <div id="play-status" role="status" aria-live="polite" style="opacity:0.8;font-size:0.95em;"></div>
