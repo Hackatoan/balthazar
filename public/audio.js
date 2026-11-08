@@ -39,6 +39,7 @@ function refreshVolumeSliders() {
     if (v != null) {
       s.value = Math.round(v * 100);
       s.title = `Volume (${Math.round(v * 100)}%)`;
+      s.setAttribute('aria-valuetext', `${Math.round(v * 100)}%`);
     }
   });
 }
@@ -55,6 +56,7 @@ document.addEventListener('input', (e) => {
   const volume = Number(slider.value) / 100;
   userVolumes[userId] = volume;
   slider.title = `Volume (${slider.value}%)`;
+  slider.setAttribute('aria-valuetext', `${slider.value}%`);
   socket.emit('set_user_volume', { guildId, userId, volume });
 });
 
@@ -464,7 +466,7 @@ socket.on('update', data => {
       div.setAttribute('aria-pressed', g.playMode === m.id ? 'true' : 'false');
       div.innerHTML = `<img src="${escapeHtml(m.avatar)}" alt="${safeUsername}'s avatar" style="width:32px;height:32px;border-radius:50%;margin-right:8px;">`+
         `<span style="margin-right:6px;">${safeUsername}</span>`+
-        `<input type="range" class="vol-slider" min="0" max="200" value="${Math.round(vol * 100)}" data-userid="${escapeHtml(m.id)}" data-guild="${escapeHtml(guildId)}" aria-label="${safeUsername} volume" title="Volume (${Math.round(vol * 100)}%)" style="width:70px;">`;
+        `<input type="range" class="vol-slider" min="0" max="200" value="${Math.round(vol * 100)}" data-userid="${escapeHtml(m.id)}" data-guild="${escapeHtml(guildId)}" aria-label="${safeUsername} volume" aria-valuetext="${Math.round(vol * 100)}%" title="Volume (${Math.round(vol * 100)}%)" style="width:70px;">`;
       g.membersEl.appendChild(div);
     });
 
