@@ -243,7 +243,7 @@ function updateSelectionStyles(g) {
     g.channelEl.setAttribute('aria-pressed', 'true');
     memberEls.forEach(div => {
       div.style.textDecoration = 'none';
-      div.setAttribute('aria-pressed', 'false');
+      div.querySelector('.member-select')?.setAttribute('aria-pressed', 'false');
     });
   } else {
     g.channelEl.style.textDecoration = 'none';
@@ -251,7 +251,7 @@ function updateSelectionStyles(g) {
     memberEls.forEach(div => {
       const isSelected = div.dataset.userid === playMode;
       div.style.textDecoration = isSelected ? 'underline' : 'none';
-      div.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
+      div.querySelector('.member-select')?.setAttribute('aria-pressed', isSelected ? 'true' : 'false');
     });
   }
 }
@@ -264,13 +264,10 @@ function setUserClickHandlers(g) {
       updateSelectionStyles(g);
       resetJitter();
     };
+    // Clicking anywhere on the row selects (as before); keyboard users reach
+    // the inner .member-select <button>, whose native Enter/Space click
+    // bubbles up to this handler.
     div.onclick = selectUser;
-    div.onkeydown = (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        selectUser();
-      }
-    };
   });
 }
 
@@ -468,14 +465,14 @@ socket.on('update', data => {
       const div = document.createElement('div');
       div.className = 'member';
       div.dataset.userid = m.id;
-      div.role = 'button';
-      div.tabIndex = 0;
       const vol = userVolumes[m.id] != null ? userVolumes[m.id] : 1;
       const safeUsername = escapeHtml(m.username || 'Unknown');
-      div.setAttribute('aria-label', `Select ${m.username} to listen to or control their audio`);
-      div.setAttribute('aria-pressed', g.playMode === m.id ? 'true' : 'false');
-      div.innerHTML = `<img src="${escapeHtml(m.avatar)}" alt="${safeUsername}'s avatar" style="width:32px;height:32px;border-radius:50%;margin-right:8px;">`+
-        `<span style="margin-right:6px;">${safeUsername}</span>`+
+      // The select control is a real <button> next to (not wrapping) the
+      // volume slider — a role=button row containing a range input is a
+      // nested-interactive control that screen readers can't operate cleanly.
+      div.innerHTML = `<button type="button" class="member-select" aria-pressed="${g.playMode === m.id ? 'true' : 'false'}" aria-label="Select ${safeUsername} to listen to or control their audio" style="display:flex;align-items:center;background:none;border:none;padding:0;margin:0;color:inherit;font:inherit;text-decoration:inherit;cursor:pointer;">`+
+        `<img src="${escapeHtml(m.avatar)}" alt="" style="width:32px;height:32px;border-radius:50%;margin-right:8px;">`+
+        `<span style="margin-right:6px;">${safeUsername}</span></button>`+
         `<input type="range" class="vol-slider" min="0" max="200" value="${Math.round(vol * 100)}" data-userid="${escapeHtml(m.id)}" data-guild="${escapeHtml(guildId)}" aria-label="${safeUsername} volume" aria-valuetext="${Math.round(vol * 100)}%" title="Volume (${Math.round(vol * 100)}%)" style="width:70px;">`;
       g.membersEl.appendChild(div);
     });
