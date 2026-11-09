@@ -2,6 +2,6 @@ flask
 numpy
 soundfile
 python-dotenv
-webrtcvad
+webrtcvad-wheels
 faster-whisper
-setuptools==69.5.1
+setuptools==84.1.0
