@@ -15,6 +15,7 @@ Balthazar joins a voice channel, streams the audio to a browser view, transcribe
 - 30-second clip capture on command or voice trigger
 - Live voice-call mode (STT → LLM → TTS)
 - Per-guild `/language`
+- `-settings` command showing the server's current Balthazar config
 
 ## Tech Stack
 

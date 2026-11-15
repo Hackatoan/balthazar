@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { createAudioPlayer, createAudioResource, NoSubscriberBehavior, StreamType } = require('@discordjs/voice');
 const prism = require('prism-media');
+const { LANGS } = require('./lang');
 
 class CommandManager {
   constructor(client, guildManager, webUI) {
@@ -35,6 +36,7 @@ class CommandManager {
           '- -listignorevc: List ignored voice channels',
           '- -clipbots: Server owner only, toggle including bot audio in clips (default OFF)',
           '- -say <message>: Balthazar speaks the message aloud in the current voice channel (text-to-speech)',
+          '- -settings: Show this server\'s Balthazar settings (clip channel, ignored VCs, language, talk mode, your DM pref)',
           '',
           '- /clip [seconds] [title] [user] [name] [only]: Slash-command version of -clip.',
           '- /say <message>: Slash-command version of -say.',
@@ -46,6 +48,13 @@ class CommandManager {
           '- "Balthazar clip that" or just "clip that" / "clip it" / "clip this"'
         ].join('\n');
         try { await message.reply(helpText); } catch (_) {}
+        return;
+      }
+
+      if (content === '-settings') {
+        try {
+          await message.reply({ content: this.formatSettings(message.guild, message.author.id), allowedMentions: { parse: [] } });
+        } catch (_) {}
         return;
       }
 
@@ -266,6 +275,34 @@ class CommandManager {
     } catch (e) {
       console.error('[command] handleMessage error:', e);
     }
+  }
+
+  // Read-only summary of everything the -setclip/-ignorevc/-clipbots/-dmtoggle
+  // and /language//talk commands configure, so people can see the current
+  // state without digging through clips-config.json.
+  formatSettings(guild, userId) {
+    const gcfg = this.guildManager.getConfig(guild.id) || {};
+    const state = this.guildManager.getGuildState(guild.id) || {};
+    const chan = (id) => (id ? `<#${id}>` : null);
+    const ignored = Array.isArray(gcfg.ignoredVoiceChannels) ? gcfg.ignoredVoiceChannels : [];
+    const lang = LANGS[gcfg.language] || LANGS.en;
+    const talk = this.guildManager.talkManager;
+    const talkLine = !talk || !talk.configured
+      ? 'unavailable (not configured)'
+      : (talk.isActive(guild.id) ? 'ON' : 'OFF');
+    const dmOn = !!this.guildManager.getDmPrefs(userId);
+    const clipDest = chan(gcfg.clipChannelId)
+      || (process.env.CLIPS_CHANNEL_ID ? `${chan(process.env.CLIPS_CHANNEL_ID)} (default)` : 'the channel the clip was requested in');
+    return [
+      '**Balthazar settings for this server**',
+      `- Voice channel: ${chan(state.currentChannelId) || 'not connected'}`,
+      `- Clip channel: ${clipDest}`,
+      `- Ignored voice channels: ${ignored.length ? ignored.map(chan).join(', ') : 'none'}`,
+      `- Include bot audio in clips: ${gcfg.clipBots ? 'ON' : 'OFF'}`,
+      `- Reply language: ${lang.label}`,
+      `- Talk mode: ${talkLine}`,
+      `- Your clip DMs: ${dmOn ? 'ON (clips of you are sent by DM)' : 'OFF'}`
+    ].join('\n');
   }
 }
 
